@@ -297,7 +297,8 @@ function resizeField() {
 }
 
 // 向きごとの2コマ歩行。右向きは左向きを左右反転して使う
-const WALK_FRAMES = { down: ['stand0', 'walk1'], up: ['stand2', 'walk4'], left: ['walk2', 'walk3'], right: ['walk2', 'walk3'] };
+// 上下は正面・背面の立ち絵のみ（歩行コマは横を向いているため使わない）
+const WALK_FRAMES = { down: ['stand0', 'stand0'], up: ['stand2', 'stand2'], left: ['walk2', 'walk3'], right: ['walk2', 'walk3'] };
 function spriteFor(id, dir, step) {
   return images[`${id}_${WALK_FRAMES[dir][step]}`];
 }
@@ -404,7 +405,7 @@ function drawField() {
     if (!img) continue;
     const h = 42, w = img.width * h / img.height;
     const cx = pp.x + TILE / 2 - camX, by = pp.y + TILE - 2 - camY;
-    const bob = moving && walkFrame ? -1 : 0;
+    const bob = moving && walkFrame ? (p.dir === 'up' || p.dir === 'down' ? -2 : -1) : 0;
     c.fillStyle = 'rgba(0,0,0,0.28)';
     c.beginPath(); c.ellipse(cx, by, 9, 3.5, 0, 0, 7); c.fill();
     c.save();
@@ -556,12 +557,22 @@ function applyItem(item, m) {
 const battle = { cv: null, ctx: null, W: 352, H: 290, bg: null };
 let B = null; // 現在のバトル
 
-const PARTY_SPOTS = [[86, 166], [62, 198], [90, 232], [66, 266]];
+// パーティは右側で左を向き、敵は左側で右を向く
+const PARTY_SPOTS = [[266, 166], [290, 198], [262, 232], [286, 266]];
 const ENEMY_SPOTS = {
-  1: [[262, 230]],
-  2: [[228, 196], [304, 244]],
-  3: [[222, 178], [306, 200], [252, 262]],
+  1: [[100, 230]],
+  2: [[124, 196], [64, 244]],
+  3: [[130, 178], [54, 200], [104, 262]],
 };
+// 戦闘ポーズ（0=待機 1=詠唱 2=攻撃 3=勝利）ごとの [元画像の番号, 左右反転するか]。すべて左向きにそろえる
+const BATTLE_POSES = {
+  leon:   [[0, true], [0, true], [1, true], [3, false]],
+  selena: [[0, false], [2, false], [2, false], [3, true]],
+  garo:   [[0, false], [0, false], [2, false], [1, false]],
+  noa:    [[0, false], [2, false], [1, false], [3, false]],
+};
+// 元絵で左を向いているモンスター（右向きにするため反転する）
+const MONSTER_FACES_LEFT = new Set(['ghost', 'harpy', 'lizardman', 'scorpion', 'skeleton']);
 
 function makeBattleBg(zone) {
   const cv = document.createElement('canvas');
@@ -796,11 +807,11 @@ function retarget(t) {
 async function stepForward(m, pose) {
   const a = B.actors[m.id];
   a.pose = pose;
-  for (let i = 0; i <= 6; i++) { a.ox = i * 3; await sleep(16); }
+  for (let i = 0; i <= 6; i++) { a.ox = -i * 3; await sleep(16); }
 }
 async function stepBack(m) {
   const a = B.actors[m.id];
-  for (let i = 6; i >= 0; i--) { a.ox = i * 3; await sleep(16); }
+  for (let i = 6; i >= 0; i--) { a.ox = -i * 3; await sleep(16); }
   a.pose = 0;
 }
 
@@ -893,7 +904,7 @@ async function hitEnemy(t, stat, power, kind, wait = 500) {
   if (t.gone) return;
   let dmg, crit = false, msg;
   if (kind === 'phys' && Math.random() < 0.04) {
-    t.ox = 10; setTimeout(() => t.ox = 0, 200);
+    t.ox = -10; setTimeout(() => t.ox = 0, 200);
     Sfx.play('cancel');
     await say(`ミス！ ${t.name}は ひらりと みをかわした！`, 600);
     return;
@@ -935,7 +946,7 @@ async function enemyAct(e) {
   const targets = G.party.filter(alive);
   if (!targets.length) return;
   const sp = d.special && Math.random() < 0.3 ? d.special : null;
-  e.ox = -14;
+  e.ox = 14;
   if (sp) {
     await say(`${e.name}の ${sp.name}！`, 350);
     const hit = sp.all ? targets : [pick(targets)];
@@ -1211,7 +1222,7 @@ const FX = {
   claw: { dur: 320, hit: 0.5,
     draw(c, f, p, pt) {
       const k = easeOut(win(p, 0, 0.5));
-      for (let i = -1; i <= 1; i++) crescent(c, pt.x + i * 8 - 30, pt.y - 10, 30, -0.6, -0.6 + k * 1.2, 5, '#ff5a5a', 1 - win(p, 0.55, 1));
+      for (let i = -1; i <= 1; i++) crescent(c, pt.x + i * 8 + 30, pt.y - 10, 30, Math.PI - 0.6, Math.PI - 0.6 + k * 1.2, 5, '#ff5a5a', 1 - win(p, 0.55, 1));
     },
     at: { 0.4(f, pt) { burst(pt.x, pt.y, 10, { color: ['#ff8080', '#ffffff'], add: true, shape: 'spark', min: 0.06, max: 0.18, life: 300 }); } } },
   slash2: { dur: 700, hit: 0.5, dim: 0.45, dimColor: '#06142e',
@@ -1221,7 +1232,7 @@ const FX = {
       crescent(c, pt.x, pt.y, 34, -0.6, -0.6 + k2 * 2.8, 12, '#5ff0ff', 1 - win(p, 0.65, 1));
       c.save(); c.globalCompositeOperation = 'lighter';
       for (let i = 0; i < 7; i++) { // 疾風の筋
-        const yy = pt.y - 26 + i * 9, len = 120, xx = pt.x + 90 - win(p, 0, 0.7) * 240 - i * 9;
+        const yy = pt.y - 26 + i * 9, len = 120, xx = pt.x - 150 + win(p, 0, 0.7) * 240 + i * 9;
         c.globalAlpha = 0.7 * (1 - win(p, 0.5, 1)); c.fillStyle = i % 2 ? '#9ff8ff' : '#ffffff';
         c.fillRect(xx, yy, len * (0.4 + (i % 3) * 0.2), 1.5);
       }
@@ -1253,7 +1264,7 @@ const FX = {
       }
       for (let i = 0; i < 6; i++) { // 画面を横切る突風
         c.globalAlpha = 0.5 * (1 - win(p, 0, 0.5)); c.fillStyle = '#e0ffe0'; c.shadowBlur = 0;
-        c.fillRect(-60 + win(p, 0, 0.5) * 480 - i * 30, 90 + i * 28, 90, 1.5);
+        c.fillRect(380 - win(p, 0, 0.5) * 480 + i * 30, 90 + i * 28, 90, 1.5);
       }
       c.restore();
     },
@@ -1264,7 +1275,7 @@ const FX = {
       c.save();
       for (const [j, pt] of pts.entries()) { // 地割れ
         const r = mulberry32(j * 13 + 5);
-        const sx = 120, sy = pt.fy + 4;
+        const sx = 232, sy = pt.fy + 4;
         const path = [[sx, sy]];
         for (let i = 1; i <= 10; i++) path.push([sx + (pt.x - sx) * i / 10 + (r() - 0.5) * 6, sy + (pt.fy - sy) * i / 10 + (r() - 0.5) * 8]);
         const n = Math.max(1, Math.floor(path.length * k));
@@ -1424,7 +1435,7 @@ const FX = {
     emit(f, dt, p) {
       if (p > 0.7 || !f.src) return;
       for (let i = 0; i < 6; i++) {
-        const a = Math.PI + rand(-0.35, 0.35), sp = rand(0.22, 0.32);
+        const a = rand(-0.35, 0.35), sp = rand(0.22, 0.32);
         particle({ x: f.src.x, y: f.src.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp + 0.03, life: rand(650, 850), color: pick(f.def.color), add: true, size: rand(3, 6), grow: 0.8 });
       }
     },
@@ -1442,7 +1453,7 @@ const FX = {
       for (let i = 0; i < 5; i++) {
         const q = (p * 1.6 + i * 0.2) % 1;
         c.globalAlpha = (1 - q) * (1 - win(p, 0.8, 1)); c.strokeStyle = '#ffb0e8'; c.lineWidth = 2.5; c.shadowColor = '#ff70d0'; c.shadowBlur = 8;
-        c.beginPath(); c.arc(f.src.x, f.src.y, 10 + q * 200, Math.PI * 0.7, Math.PI * 1.3); c.stroke();
+        c.beginPath(); c.arc(f.src.x, f.src.y, 10 + q * 200, -Math.PI * 0.3, Math.PI * 0.3); c.stroke();
       }
       c.restore();
     },
@@ -1477,7 +1488,7 @@ function spawnFx(kind, t, opts = {}) {
   if (opts.self) pts = [targetPoint(opts.self)];
   else pts = t === null ? livingEnemies().map(targetPoint) : t === 'party' ? G.party.filter(alive).map(targetPoint) : [targetPoint(t)];
   let src = null;
-  if (opts.src) { const sp = targetPoint(opts.src); src = { x: sp.x - sp.h * 0.25, y: sp.fy - sp.h * 0.6 }; }
+  if (opts.src) { const sp = targetPoint(opts.src); src = { x: sp.x + sp.h * 0.25, y: sp.fy - sp.h * 0.6 }; }
   const fx = { kind, def, t: 0, dur: def.dur, hit: def.hit, pts: pts.filter(Boolean), src, color: opts.color || '#bfe3ff', fired: {} };
   B.fx.push(fx);
   return fx;
@@ -1581,7 +1592,7 @@ function drawBattle(dt) {
     else if (e.blink > 0 && Math.floor(e.blink / 60) % 2) c.globalAlpha = 0.25;
     if (e.gone) { c.globalAlpha = Math.max(0, e.dying); c.filter = e.fled ? 'none' : 'brightness(1.8) sepia(1) hue-rotate(220deg)'; }
     c.translate(e.x + e.ox, e.y + bob);
-    c.scale(-1, 1); // 左（パーティ側）を向かせる
+    if (MONSTER_FACES_LEFT.has(e.id)) c.scale(-1, 1); // 右（パーティ側）を向かせる
     if (e.gone && !e.fled) c.scale(1 + (1 - e.dying) * 0.3, Math.max(0.05, e.dying));
     c.imageSmoothingEnabled = false;
     c.drawImage(img, -w / 2, -h, w, h);
@@ -1600,11 +1611,12 @@ function drawBattle(dt) {
     const a = B.actors[m.id];
     const isActive = B.active === m;
     const tgt = B.targetSel && B.targetSel.kind !== 'enemy' && B.targetSel.cands.includes(m);
-    const img = images[`${m.id}_battle${alive(m) ? a.pose : 0}`];
+    const [src, mirror] = BATTLE_POSES[m.id][alive(m) ? a.pose : 0];
+    const img = images[`${m.id}_battle${src}`];
     if (!img) return;
     const k = 0.66;
     const w = img.width * k, h = img.height * k;
-    const x = a.x + a.ox + (isActive ? 10 : 0), y = a.y;
+    const x = a.x + a.ox + (isActive ? -10 : 0), y = a.y;
     if (a.blink > 0) a.blink -= dt;
     if (a.hurt > 0) a.hurt -= dt;
     c.save();
@@ -1613,13 +1625,14 @@ function drawBattle(dt) {
     c.imageSmoothingEnabled = false;
     if (!alive(m)) {
       c.globalAlpha = 0.75; c.filter = 'grayscale(1) brightness(0.8)';
-      c.translate(x, y - 8); c.rotate(-Math.PI / 2);
+      c.translate(x, y - 8); c.rotate(Math.PI / 2);
       c.drawImage(img, -h / 2, -w / 2, w * 0.9, h * 0.9);
     } else {
       if (a.blink > 0 && Math.floor(a.blink / 60) % 2) c.globalAlpha = 0.3;
       const hx = a.hurt > 0 ? rand(-2, 2) : 0;
       if (m.hp < m.mhp * 0.25) c.filter = 'saturate(0.7)';
-      c.drawImage(img, x - w / 2 + hx, y - h, w, h);
+      if (mirror) { c.translate(x + hx, 0); c.scale(-1, 1); c.drawImage(img, -w / 2, y - h, w, h); }
+      else c.drawImage(img, x - w / 2 + hx, y - h, w, h);
     }
     c.restore();
     if (tgt) {
