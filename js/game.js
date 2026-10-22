@@ -30,6 +30,39 @@ function loadImages() {
   })));
 }
 
+// 色替えキャラの画像を作る（VARIANTS）
+function recolor(img, tone) {
+  const cv = document.createElement('canvas');
+  cv.width = img.width; cv.height = img.height;
+  const c = cv.getContext('2d');
+  c.drawImage(img, 0, 0);
+  const d = c.getImageData(0, 0, cv.width, cv.height), a = d.data;
+  for (let i = 0; i < a.length; i += 4) {
+    const r = a[i], g = a[i + 1], b = a[i + 2], l = r * 0.3 + g * 0.59 + b * 0.11;
+    if (tone === 'old') { a[i] = l * 0.65 + r * 0.35 + 12; a[i + 1] = l * 0.65 + g * 0.35 + 8; a[i + 2] = l * 0.65 + b * 0.35; }
+    else if (tone === 'dark') { a[i] = r * 0.55 + 25; a[i + 1] = g * 0.4 + 10; a[i + 2] = b * 0.55 + 35; }
+    else if (tone === 'crimson') { a[i] = Math.max(r, b) * 0.9 + 20; a[i + 1] = g * 0.45; a[i + 2] = r * 0.4 + 10; }
+  }
+  c.putImageData(d, 0, 0);
+  return cv;
+}
+function makeVariants() {
+  const keys = ['face', 'stand0', 'stand1', 'stand2', 'stand3', 'walk0', 'walk1', 'walk2', 'walk3', 'walk4', 'battle0', 'battle1', 'battle2', 'battle3'];
+  for (const id in VARIANTS) {
+    const v = VARIANTS[id];
+    for (const k of keys) { const src = images[`${v.from}_${k}`]; if (src) images[`${id}_${k}`] = recolor(src, v.tone); }
+  }
+}
+// <img> に使える URL（色替えキャンバスは data URL にする）
+const urlCache = {};
+function imgURL(name) {
+  if (urlCache[name]) return urlCache[name];
+  const im = images[name];
+  if (!im) return IMG_DIR + name + '.png';
+  return (urlCache[name] = im.src || im.toDataURL());
+}
+const poseKey = id => (VARIANTS[id] ? VARIANTS[id].from : id);
+
 function storageGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
 function storageSet(key, v) { try { localStorage.setItem(key, v); return true; } catch (e) { return false; } }
 
@@ -129,8 +162,9 @@ const canEquip = (m, id) => { const w = EQUIPS[id].who; return w === 'all' || w.
 const alive = m => m.hp > 0;
 
 function newGame() {
-  G.party = [makeMember(PARTY_BASE[0])]; // 最初はレオンひとり
-  G.flags = {}; G.reso = []; G.objective = '';
+  G.roster = { leon: makeMember(PARTY_BASE[0]) };
+  G.party = [G.roster.leon]; // 最初はレオンひとり
+  G.flags = {}; G.reso = []; G.objective = ''; G.stash = {}; G.chapterId = 'prologue';
   G.items = { ...START_ITEMS };
   G.bag = {};
   G.gold = START_GOLD;
@@ -144,9 +178,20 @@ function resetPositions(x, y) {
 }
 
 const SAVE_KEY = 'eclipse-saga-save-v1';
+const packMember = m => ({ id: m.id, lv: m.lv, exp: m.exp, hp: m.hp, mp: m.mp, mhp: m.mhp, mmp: m.mmp, b: m.b, equip: m.equip });
+function unpackMember(s) {
+  const m = makeMember(findBase(s.id));
+  if (!s.b) s.b = { atk: s.atk, def: s.def, mag: s.mag, spd: s.spd }; // 旧セーブ
+  Object.assign(m, s);
+  if (!s.equip) m.equip = { ...m.base.equip };
+  recalc(m);
+  return m;
+}
 function saveGame() {
+  const roster = {};
+  for (const id in G.roster) roster[id] = packMember(G.roster[id]);
   const data = {
-    party: G.party.map(m => ({ id: m.id, lv: m.lv, exp: m.exp, hp: m.hp, mp: m.mp, mhp: m.mhp, mmp: m.mmp, b: m.b, equip: m.equip })),
+    v: 2, roster, partyIds: G.party.map(m => m.id), stash: G.stash, chapterId: G.chapterId,
     items: G.items, bag: G.bag, gold: G.gold, flags: G.flags, reso: G.reso, objective: G.objective, x: G.pos[0].x, y: G.pos[0].y,
   };
   return storageSet(SAVE_KEY, JSON.stringify(data));
@@ -156,18 +201,15 @@ function loadGame() {
   if (!raw) return false;
   try {
     const d = JSON.parse(raw);
-    G.party = d.party.map(s => {
-      const m = makeMember(PARTY_BASE.find(b => b.id === s.id));
-      if (!s.b) s.b = { atk: s.atk, def: s.def, mag: s.mag, spd: s.spd }; // 旧セーブ
-      Object.assign(m, s);
-      if (!s.equip) m.equip = { ...m.base.equip };
-      recalc(m);
-      return m;
-    });
+    if (d.v !== 2) return false; // ストーリー変更前のセーブは使わない（はじめからになる）
+    G.roster = {};
+    if (d.roster) for (const id in d.roster) G.roster[id] = unpackMember(d.roster[id]);
+    else for (const s of d.party) G.roster[s.id] = unpackMember(s); // 旧セーブ
+    G.party = (d.partyIds || d.party.map(s => s.id)).map(id => G.roster[id]);
+    G.stash = d.stash || {}; G.chapterId = d.chapterId || 'prologue';
     G.items = d.items; G.bag = d.bag || {}; G.gold = d.gold;
-    // ストーリー導入前のセーブは序章クリア扱い
-    G.flags = d.flags || { appraised: true, rumor: true, forestDone: true, prologueDone: true };
-    G.reso = d.reso || (G.party.some(m => m.id === 'selena') ? ['selena'] : []);
+    G.flags = d.flags || {};
+    G.reso = d.reso || [];
     G.objective = d.objective || '';
     G.map = genMap();
     setupWorld();
@@ -413,16 +455,15 @@ function tryMove(dir) {
 
 async function interact(o, x, y) {
   if (G.mode !== 'field') return;
+  if (o.kind === 'building' && (x !== o.doorTile.x || y !== o.doorTile.y)) return; // 壁にぶつかっただけ
+  const ev = o.id && (DOOR_EVENTS[o.id] || []).find(d => condOk(d.when));
+  if (ev) { Sfx.play('ok'); await runEvent(ev.event); return; }
   if (o.kind === 'building') {
-    if (x !== o.doorTile.x || y !== o.doorTile.y) return; // 壁にぶつかっただけ
     G.mode = 'busy';
     Sfx.play('ok');
     if (SHOPS[o.id]) await openShop(o.id);
     else if (o.id === 'inn') await visitInn();
-    else {
-      const ev = (DOOR_EVENTS[o.id] || []).find(d => condOk(d.when));
-      if (ev) await runEvent(ev.event); else G.mode = 'field';
-    }
+    else G.mode = 'field';
     return;
   }
   if (!o.text) return;
@@ -606,8 +647,10 @@ function updateHud() {
   $('#objective').textContent = G.objective ? '目的：' + G.objective : '';
   $('#objective').hidden = !G.objective;
   const box = $('#hud-party');
-  if (box.children.length !== G.party.length) {
-    box.innerHTML = G.party.map(m => `<div class="mini" data-id="${m.id}"><img src="${IMG_DIR}${m.id}_face.png" alt=""><div class="mini-bars"><span class="mini-name"></span><i class="bar hp"><b></b></i><i class="bar mp"><b></b></i></div></div>`).join('');
+  const hudIds = G.party.map(m => m.id).join(',');
+  if (box.dataset.ids !== hudIds) {
+    box.dataset.ids = hudIds;
+    box.innerHTML = G.party.map(m => `<div class="mini" data-id="${m.id}"><img src="${imgURL(m.id + '_face')}" alt=""><div class="mini-bars"><span class="mini-name"></span><i class="bar hp"><b></b></i><i class="bar mp"><b></b></i></div></div>`).join('');
   }
   G.party.forEach((m, i) => {
     const el = box.children[i];
@@ -668,7 +711,7 @@ function renderMenu(note = '') {
   st.innerHTML = G.party.map(m => {
     const next = expForLevel(m.lv + 1) - m.exp;
     return `<div class="card ${alive(m) ? '' : 'dead'}" data-i="${G.party.indexOf(m)}" role="button" tabindex="0">
-      <img class="face" src="${IMG_DIR}${m.id}_face.png" alt="">
+      <img class="face" src="${imgURL(m.id + '_face')}" alt="">
       <div class="card-body">
         <div class="card-head"><b>${m.name}</b><span>Lv ${m.lv}</span></div>
         <div class="card-job">${m.base.job}・${m.base.role}</div>
@@ -685,6 +728,7 @@ function renderMenu(note = '') {
     `<button class="item-btn" data-item="${id}" ${G.items[id] ? '' : 'disabled'}><b>${item.name}</b><span>×${G.items[id] || 0}</span><small>${item.desc}</small></button>`).join('');
   it.querySelectorAll('button').forEach(b => b.onclick = () => useItemInField(b.dataset.item));
   $('#menu-gold').textContent = G.gold + ' G';
+  $('#menu-chapter').textContent = (CHAPTERS[G.chapterId] || { name: '序章 レオン' }).name;
   $('#menu-note').textContent = note;
   $('#btn-sound').textContent = '効果音：' + (Sfx.on ? 'ON' : 'OFF');
 }
@@ -745,7 +789,7 @@ async function talk(who, text) {
   const ov = $('#talk');
   const face = $('#talk-face');
   face.hidden = !sp.face;
-  if (sp.face) face.src = IMG_DIR + sp.face + '.png';
+  if (sp.face) face.src = imgURL(sp.face);
   $('#talk-name').textContent = sp.name;
   $('#talk-name').hidden = !sp.name;
   ov.hidden = false;
@@ -785,14 +829,28 @@ function setObjective(text) {
 function joinParty(id) {
   if (G.party.some(m => m.id === id)) return;
   const lead = G.party[0];
-  const m = makeMember(PARTY_BASE.find(b => b.id === id), lead.lv);
-  m.exp = expForLevel(m.lv);
+  let m = G.roster[id];
+  if (!m) { m = G.roster[id] = makeMember(findBase(id), lead.lv); m.exp = expForLevel(m.lv); }
   G.party.push(m);
   const p = G.pos[G.pos.length - 1];
   G.pos.push({ x: p.x, y: p.y, fx: p.x, fy: p.y, dir: p.dir });
-  $('#hud-party').innerHTML = '';
   updateHud();
   Sfx.play('lvup');
+}
+
+// 章の切りかえ：いまのパーティと持ち物を しまい、その章の主人公たちに かえる
+function startChapter(id) {
+  const ch = CHAPTERS[id];
+  G.stash[G.chapterId] = { partyIds: G.party.map(m => m.id), gold: G.gold, items: G.items, bag: G.bag };
+  G.chapterId = id;
+  G.party = ch.party.map(([pid, lv]) => {
+    if (!G.roster[pid]) { G.roster[pid] = makeMember(findBase(pid), lv); G.roster[pid].exp = expForLevel(lv); }
+    return G.roster[pid];
+  });
+  G.gold = ch.gold; G.items = { ...ch.items }; G.bag = {};
+  resetPositions(ch.start.x, ch.start.y);
+  G.pos.forEach(p => p.dir = ch.start.dir);
+  updateHud();
 }
 
 async function runEvent(name) {
@@ -801,7 +859,10 @@ async function runEvent(name) {
   G.eventRunning = true;
   G.mode = 'busy'; field.input = null;
   try {
-    for (const s of steps) {
+    let list = steps;
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      if (s.t === 'goto') { list = EVENTS[s.event]; i = -1; continue; }
       if (['say', 'battle', 'join'].includes(s.t)) $('#narr').hidden = true;
       if ((await doStep(s)) === 'abort') break;
       if (G.mode !== 'battle') G.mode = 'busy';
@@ -839,8 +900,16 @@ async function doStep(s) {
     case 'resonance': if (!G.reso.includes(s.id)) G.reso.push(s.id); return;
     case 'healAll': G.party.forEach(m => { m.hp = m.mhp; m.mp = m.mmp; }); return;
     case 'save': saveGame(); return;
+    case 'leave': {
+      const i = G.party.findIndex(m => m.id === s.id);
+      if (i > 0) { G.party.splice(i, 1); G.pos.splice(i, 1); }
+      if (findBase(s.id).guest) delete G.roster[s.id];
+      updateHud();
+      return;
+    }
+    case 'chapterStart': return startChapter(s.id);
     case 'battle': {
-      const r = await startBattle(s.enemies, { boss: s.boss });
+      const r = await startBattle(s.enemies, { boss: s.boss, hpMul: s.hpMul });
       return r === 'win' ? undefined : 'abort';
     }
   }
@@ -1058,10 +1127,11 @@ function makeBattleBg(zone) {
   return cv;
 }
 
-function makeEnemy(id, i, n) {
+function makeEnemy(id, i, n, hpMul = 1) {
   const d = MONSTERS[id];
   const [x, y] = ENEMY_SPOTS[n][i];
-  return { id, data: d, name: d.name, hp: d.hp, mhp: d.hp, atk: d.atk, def: d.def, spd: d.spd,
+  const hp = Math.round(d.hp * hpMul);
+  return { id, data: d, name: d.name, hp, mhp: hp, atk: d.atk, def: d.def, spd: d.spd,
     x, y, k: 0.9 * d.scale * (n >= 3 ? 0.85 : 1), blink: 0, dying: 0, gone: false, fled: false, ox: 0 };
 }
 
@@ -1089,7 +1159,7 @@ async function beginBattle(ids, opts) {
   await fade(true, 300);
   const zone = zoneAt(G.pos[0].x, G.pos[0].y);
   B = {
-    enemies: ids.map((id, i) => makeEnemy(id, i, ids.length)),
+    enemies: ids.map((id, i) => makeEnemy(id, i, ids.length, opts.hpMul || 1)),
     fx: [], parts: [], nums: [], shake: 0, flash: 0, flashColor: '#ffffff', dim: 0, dimColor: '#000000', guard: 0,
     active: null, targetSel: null, actors: {}, over: false, zone, boss: !!opts.boss, cutin: null,
   };
@@ -1113,7 +1183,7 @@ async function battleLoop() {
     const input = await inputPhase();
     if (input.run) {
       setCmd([]);
-      await say('レオンたちは にげだした！', 600);
+      await say(`${G.party[0].name}たちは にげだした！`, 600);
       if (Math.random() < 0.65) { Sfx.play('run'); await say('うまく にげきれた！', 700); return endBattle('run'); }
       await say('しかし まわりこまれてしまった！', 800);
       await execTurn([]);
@@ -1572,7 +1642,7 @@ async function victory(beaten) {
 async function defeat() {
   setCmd([]);
   Sfx.play('lose');
-  await say('レオンたちは ぜんめつしてしまった…', 0);
+  await say(`${G.party[0].name}たちは ぜんめつしてしまった…`, 0);
   await waitTap();
   G.gold = Math.floor(G.gold / 2);
   G.party.forEach(m => { m.hp = m.mhp; m.mp = m.mmp; });
@@ -1613,8 +1683,10 @@ function waitTap() {
 function renderBattleStatus() {
   if (!B) return;
   const box = $('#bstatus');
-  if (box.children.length !== G.party.length) {
-    box.innerHTML = G.party.map(m => `<div class="brow" data-id="${m.id}"><img src="${IMG_DIR}${m.id}_face.png" alt=""><div class="brow-body"><div class="brow-name"></div><div class="brow-line"><span>HP</span><i class="bar hp"><b></b></i><em class="hpn"></em></div><div class="brow-line"><span>MP</span><i class="bar mp"><b></b></i><em class="mpn"></em></div></div></div>`).join('');
+  const ids = G.party.map(m => m.id).join(',');
+  if (box.dataset.ids !== ids) {
+    box.dataset.ids = ids;
+    box.innerHTML = G.party.map(m => `<div class="brow" data-id="${m.id}"><img src="${imgURL(m.id + '_face')}" alt=""><div class="brow-body"><div class="brow-name"></div><div class="brow-line"><span>HP</span><i class="bar hp"><b></b></i><em class="hpn"></em></div><div class="brow-line"><span>MP</span><i class="bar mp"><b></b></i><em class="mpn"></em></div></div></div>`).join('');
   }
   G.party.forEach((m, i) => {
     const el = box.children[i];
@@ -2142,7 +2214,7 @@ function drawBattle(dt) {
     const a = B.actors[m.id];
     const isActive = B.active === m;
     const tgt = B.targetSel && B.targetSel.kind !== 'enemy' && B.targetSel.cands.includes(m);
-    const [src, mirror] = BATTLE_POSES[m.id][alive(m) ? a.pose : 0];
+    const [src, mirror] = BATTLE_POSES[poseKey(m.id)][alive(m) ? a.pose : 0];
     const img = images[`${m.id}_battle${src}`];
     if (!img) return;
     const k = 0.66;
@@ -2296,6 +2368,7 @@ async function boot() {
   battle.cv = $('#battle'); battle.ctx = battle.cv.getContext('2d');
   makeCastle();
   await loadImages();
+  makeVariants();
   setupInput();
   const hasSave = !!storageGet(SAVE_KEY);
   $('#btn-continue').hidden = !hasSave;

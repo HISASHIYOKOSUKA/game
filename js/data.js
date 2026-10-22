@@ -23,6 +23,22 @@ const PARTY_BASE = [
     skills: ['fire', 'blizzard', 'thunder'], equip: { weapon: 'apprentice', armor: 'travelclothes', acc: null } },
 ];
 
+// その章だけの仲間（ゲスト）。見た目は既存キャラの色を変えて作る（VARIANTS）
+const GUESTS = [
+  { id: 'harold', name: 'ハロルド', job: 'アルディス家の老騎士', role: '前衛・防御（ゲスト）', guest: true,
+    hp: 300, mp: 24, atk: 34, def: 26, mag: 4, spd: 7,
+    grow: { hp: 20, mp: 2, atk: 3, def: 3, mag: 0, spd: 1 },
+    skills: ['teppeki'], equip: { weapon: null, armor: null, acc: null } },
+];
+const findBase = id => PARTY_BASE.find(b => b.id === id) || GUESTS.find(b => b.id === id);
+
+// 色替えキャラ：from の画像を tone で塗りなおす
+const VARIANTS = {
+  harold:   { from: 'garo', tone: 'old' },
+  thug:     { from: 'garo', tone: 'dark' },
+  cultist:  { from: 'noa',  tone: 'crimson' },
+};
+
 // target: enemy=敵1体 / enemies=敵全体 / ally=味方1人 / allies=味方全員 / deadally=戦闘不能の味方
 const SKILLS = {
   shippu:   { name: '疾風斬',     type: 'skill', mp: 5,  target: 'enemy',    kind: 'phys',   power: 1.7, fx: 'slash2' },
@@ -129,9 +145,9 @@ const MONSTERS = {
 
 // 城からの距離で出現テーブルが変わる（暫定）
 const ZONES = [
-  { name: '町の周辺', danger: 1, maxDist: 18, max: 3,
+  { name: '町の周辺', danger: 1, maxDist: 25, max: 3,
     table: [['slime', 5], ['goblin', 4], ['wolf', 2], ['mandragora', 2], ['metalslime', 0.3]] },
-  { name: '辺境の地', danger: 2, maxDist: 27, max: 3,
+  { name: '辺境の地', danger: 2, maxDist: 32, max: 3,
     table: [['wolf', 3], ['harpy', 3], ['skeleton', 3], ['ghost', 2], ['scorpion', 2], ['lizardman', 2], ['metalslime', 0.4]] },
   { name: '魔境', danger: 3, maxDist: 999, max: 3,
     table: [['lizardman', 2], ['wyvern', 3], ['vampire', 2], ['basilisk', 2], ['golem', 2], ['metalslime', 0.4], ['darkdragon', 0.6]] },

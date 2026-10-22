@@ -14,6 +14,7 @@ const BUILDING_STYLES = {
   weapon: { wall: '#e4dccc', wallDark: '#b8ab92', wallStyle: 'stone', roof: '#5a6a8a', roofDark: '#3a4662', roofLight: '#8494b4', roofStyle: 'hip', sign: 'weapon', awning: ['#e8e0d0', '#8a4a3a'], chimney: true },
   armor:  { wall: '#d8e6fa', wallDark: '#a8bedc', wallStyle: 'brick', roof: '#4a78c8', roofDark: '#30549a', roofLight: '#78a4ec', roofStyle: 'flat', sign: 'armor', awning: ['#ffffff', '#4a78c8'] },
   house1: { wall: '#fce0e4', wallDark: '#e4b4bc', wallStyle: 'siding', roof: '#7a5ab8', roofDark: '#563c8c', roofLight: '#a688dc', roofStyle: 'gable', chimney: true },
+  manor:  { wall: '#efe6d6', wallDark: '#c8b89c', wallStyle: 'stone', roof: '#8a3a4a', roofDark: '#5e2232', roofLight: '#b85a6a', roofStyle: 'hip', chimney: true, door2: true },
   house2: { wall: '#fff6d0', wallDark: '#e4d498', wallStyle: 'siding', roof: '#4a9a58', roofDark: '#2e7040', roofLight: '#78c486', roofStyle: 'gable' },
 };
 
@@ -252,6 +253,24 @@ function makeFountainSprite(frame) {
   return cv;
 }
 
+function makeCaveSprite() {
+  const cv = newCanvas(64, 72), c = cv.getContext('2d');
+  c.fillStyle = OUT; c.beginPath(); c.moveTo(0, 72); c.lineTo(4, 30); c.lineTo(18, 8); c.lineTo(40, 2); c.lineTo(58, 18); c.lineTo(64, 40); c.lineTo(64, 72); c.fill();
+  c.fillStyle = '#9a8268'; c.beginPath(); c.moveTo(2, 71); c.lineTo(6, 31); c.lineTo(19, 10); c.lineTo(40, 4); c.lineTo(57, 19); c.lineTo(62, 41); c.lineTo(62, 71); c.fill();
+  c.fillStyle = '#c4a884'; c.beginPath(); c.moveTo(6, 31); c.lineTo(19, 10); c.lineTo(40, 4); c.lineTo(30, 20); c.lineTo(14, 34); c.fill();
+  c.fillStyle = '#76604a'; c.beginPath(); c.moveTo(57, 19); c.lineTo(62, 41); c.lineTo(62, 71); c.lineTo(50, 71); c.lineTo(52, 30); c.fill();
+  // 入口
+  c.fillStyle = OUT; c.beginPath(); c.moveTo(16, 72); c.lineTo(16, 48); c.quadraticCurveTo(32, 26, 48, 48); c.lineTo(48, 72); c.fill();
+  const g = c.createLinearGradient(0, 36, 0, 72); g.addColorStop(0, '#000000'); g.addColorStop(1, '#2a2030');
+  c.fillStyle = g; c.beginPath(); c.moveTo(18, 72); c.lineTo(18, 49); c.quadraticCurveTo(32, 29, 46, 49); c.lineTo(46, 72); c.fill();
+  // 坑木
+  box(c, 13, 44, 5, 28, OUT); box(c, 14, 45, 3, 27, '#a8703c');
+  box(c, 46, 44, 5, 28, OUT); box(c, 47, 45, 3, 27, '#a8703c');
+  box(c, 11, 40, 42, 6, OUT); box(c, 12, 41, 40, 4, '#c08850');
+  for (const [x, y] of [[10, 52], [52, 58], [24, 16], [44, 12]]) { box(c, x, y, 4, 3, '#665040'); box(c, x, y, 4, 1, '#d8c0a0'); }
+  return cv;
+}
+
 // TOWN_OBJECTS からスプライト付きのオブジェクトを作る
 function buildTownObjects(castleSprite) {
   const sprites = { lamp: makeLampSprite(), sign: makeSignSprite(), mailbox: makeMailboxSprite(), bench: makeBenchSprite() };
@@ -260,6 +279,7 @@ function buildTownObjects(castleSprite) {
     const o = Object.assign({ w: 1, h: 1 }, d);
     if (o.kind === 'building') { o.sprite = makeBuildingSprite(o); o.solidFrom = 1; o.doorTile = { x: o.x + o.door, y: o.y + o.h - 1 }; }
     else if (o.kind === 'tree') o.sprite = makeTreeSprite(i * 7 + 3);
+    else if (o.kind === 'cave') o.sprite = makeCaveSprite();
     else if (o.kind === 'castle') { o.sprite = castleSprite; o.text = 'ルミナ城。\nいまは 門が かたく とじられている。'; }
     else if (o.kind === 'fountain') { o.frames = fountainFrames; o.sprite = fountainFrames[0]; o.text = 'きれいな 水が わきでている。\nコインが たくさん しずんでいる…。'; }
     else o.sprite = sprites[o.kind];

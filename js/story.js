@@ -2,16 +2,19 @@
 'use strict';
 
 const SPEAKERS = {
-  leon:   { name: 'レオン', face: 'leon_face' },
-  selena: { name: 'セレナ', face: 'selena_face' },
-  garo:   { name: 'ガロ',   face: 'garo_face' },
-  noa:    { name: 'ノア',   face: 'noa_face' },
-  god:    { name: '？？？', face: 'lucifer_face' },
-  ren:    { name: '蓮' },
-  mom:    { name: '母さん' },
-  baba:   { name: '占いばば' },
-  guard:  { name: '門番' },
-  info:   { name: '' },
+  leon:    { name: 'レオン', face: 'leon_face' },
+  selena:  { name: 'セレナ', face: 'selena_face' },
+  garo:    { name: 'ガロ',   face: 'garo_face' },
+  noa:     { name: 'ノア',   face: 'noa_face' },
+  harold:  { name: 'ハロルド', face: 'harold_face' },
+  thug:    { name: 'ゴルドー商会の男', face: 'thug_face' },
+  cultist: { name: '黒いフードの男', face: 'cultist_face' },
+  god:     { name: '？？？', face: 'lucifer_face' },
+  ren:     { name: '蓮' },
+  mom:     { name: 'レオンの母さん' },
+  baba:    { name: '占いばば' },
+  innkeeper: { name: '宿屋の主人' },
+  info:    { name: '' },
 };
 
 // 共鳴技（レオン＋仲間）。mp は [レオン, 仲間]
@@ -26,28 +29,49 @@ const RESONANCE = {
 
 // フィールドに立つ人物・魔物。when の条件を満たす間だけ表示される
 const NPCS = [
-  { id: 'selena', sprite: 'selena', x: 11, y: 24, dir: 'left', when: { flag: 'rumor', not: 'forestDone' } },
-  { id: 'wolf',   monster: 'wolf',   x: 9, y: 24, when: { flag: 'rumor', not: 'forestDone' } },
-  { id: 'gob1',   monster: 'goblin', x: 9, y: 25, when: { flag: 'rumor', not: 'forestDone' } },
-  { id: 'gob2',   monster: 'goblin', x: 10, y: 25, when: { flag: 'rumor', not: 'forestDone' } },
+  // 序章：西の森のウルフ
+  { id: 'wolf1', monster: 'wolf', x: 10, y: 24, when: { flag: 'appraised', not: 'forestDone' } },
+  { id: 'wolf2', monster: 'wolf', x: 9, y: 25, when: { flag: 'appraised', not: 'forestDone' } },
+  // 第一章：屋敷に来たゴルドー商会の男たち
+  { id: 'thug1', sprite: 'thug', x: 54, y: 20, dir: 'up', when: { flag: 'ch1', not: 'thugsLeft' } },
+  { id: 'thug2', sprite: 'thug', x: 56, y: 20, dir: 'up', when: { flag: 'ch1', not: 'thugsLeft' } },
+  // 第一章：洞くつの前の取引
+  { id: 'thug3', sprite: 'thug', x: 29, y: 38, dir: 'left', when: { flag: 'heardCave', not: 'ch1Boss' } },
+  { id: 'cult1', sprite: 'cultist', x: 28, y: 38, dir: 'right', when: { flag: 'heardCave', not: 'ch1Boss' } },
 ];
 
 // 足を踏み入れると始まるイベント
 const TRIGGERS = [
-  { x0: 12, y0: 23, x1: 15, y1: 26, when: { flag: 'rumor', not: 'forestDone' }, event: 'forest' },
+  { x0: 12, y0: 23, x1: 14, y1: 26, when: { flag: 'appraised', not: 'forestDone' }, event: 'forest' },
+  { x0: 30, y0: 37, x1: 33, y1: 39, when: { flag: 'heardCave', not: 'ch1Boss' }, event: 'cave' },
 ];
 
-// 建物のとびらで始まるイベント（上から順に条件を見る）
+// 建物などにぶつかると始まるイベント（上から順に条件を見る。合うものがなければ通常の動作）
 const DOOR_EVENTS = {
   house1: [
+    { when: { flag: 'ch1' }, event: 'momCh1' },
     { when: { not: 'appraised' }, event: 'momBefore' },
-    { when: { not: 'forestDone' }, event: 'momRumor' },
     { event: 'momAfter' },
   ],
   house2: [
+    { when: { flag: 'ch1' }, event: 'babaCh1' },
     { when: { not: 'appraised' }, event: 'baba' },
     { event: 'babaAfter' },
   ],
+  inn: [
+    { when: { flag: 'ch1', not: 'heardCave' }, event: 'innRumor' },
+  ],
+  manor: [
+    { when: { flag: 'ch1Boss', not: 'ch1Done' }, event: 'manorEnd' },
+    { when: { flag: 'ch1' }, event: 'manorTalk' },
+    { event: 'manorLocked' },
+  ],
+};
+
+// 章ごとの出だし（パーティ・お金・持ち物・開始位置）
+const CHAPTERS = {
+  ch1: { name: '第一章 セレナ', party: [['selena', 3], ['harold', 5]], gold: 150,
+         items: { potion: 4, ether: 1, phoenix: 1 }, start: { x: 55, y: 18, dir: 'down' } },
 };
 
 const EVENTS = {
@@ -64,7 +88,7 @@ const EVENTS = {
     { t: 'narr', img: 'lucifer_art', speaker: 'ren', text: 'こころが かよう……それだけ？\nもっとこう、チートとか……' },
     { t: 'narr', img: 'lucifer_art', speaker: 'god', text: 'ふふ。それで じゅうぶんさ。\n――見せておくれ。\n人が、守るに 値するかどうかを。' },
     { t: 'flash' },
-    { t: 'chapter', no: '序章', title: 'ハズレスキルの剣士' },
+    { t: 'chapter', no: '序章', title: 'ハズレスキルの剣士', sub: 'レオンの章' },
     { t: 'warp', x: 24, y: 15, dir: 'down' },
     { t: 'fadeIn' },
     { t: 'say', who: 'leon', text: '（……ここは ルミナの町。\nおれは レオン、17さい。\nそして まえは 相馬 蓮だった）' },
@@ -78,12 +102,12 @@ const EVENTS = {
   momBefore: [
     { t: 'say', who: 'mom', text: 'まだ いってないの？ 占いの館は 町の 東がわ、\nみどりの 屋根の いえよ。' },
   ],
-  momRumor: [
-    { t: 'say', who: 'mom', text: 'アルディス家の おじょうさんが 森へ？\nあそこは さいきん ウルフが でるのに……\nレオン、気をつけて いくのよ！' },
-  ],
   momAfter: [
-    { t: 'say', who: 'mom', text: 'あら、かわいい おともだちね。\nレオンを よろしくね、セレナちゃん。' },
-    { t: 'say', who: 'selena', text: 'は、はい！ こちらこそ！' },
+    { t: 'say', who: 'mom', text: 'ランク F？ いいじゃないの。\n母さんなんて【にんじんを きれいに むける】よ。\nさ、むりは しないでね。' },
+  ],
+  momCh1: [
+    { t: 'say', who: 'mom', text: 'あら、アルディス家の おじょうさま！\nうちの レオン？ 「つよく なるんだ」って\n森へ いったきり、もどらないのよ。' },
+    { t: 'say', who: 'selena', text: '（レオン……どんな かたなのかしら）' },
   ],
 
   baba: [
@@ -94,54 +118,107 @@ const EVENTS = {
     { t: 'say', who: 'leon', text: 'ランク F……。' },
     { t: 'say', who: 'baba', text: 'まあ、げんきを おだし。\n八百屋の トムなんて【キャベツの気持ちがわかる】だよ。\nアンタは 人間の 気持ちだ。 だいぶ マシさね。' },
     { t: 'say', who: 'leon', text: '（なぐさめに なってない……）' },
+    { t: 'say', who: 'baba', text: 'そうそう、さいきん 西の 森で\nウルフの むれが あばれてるそうだ。\n腕だめしに どうだい？ むちゃは するんじゃないよ。' },
     { t: 'flag', name: 'appraised' },
-    { t: 'sfx', name: 'hurt' },
-    { t: 'say', who: 'guard', text: 'たいへんだ！ たいへんだー！\nアルディス家の おじょうさんが、\nひとりで 西の 森へ 魔物たいじに いっちまった！' },
-    { t: 'say', who: 'guard', text: '森には ウルフが 出るってのに……\nだれか 腕の たつ やつは いないのか！' },
-    { t: 'say', who: 'leon', text: '……おれが いく！' },
-    { t: 'say', who: 'baba', text: 'ひぇっ、ランク F が？\n……まあ、いっといで。\nアンタの 目は、いい 目だよ。' },
-    { t: 'flag', name: 'rumor' },
-    { t: 'objective', text: '町の西の 出口から ルミナの森へ いそぐ' },
+    { t: 'objective', text: '町の西の ルミナの森で ウルフの むれを たいじする' },
   ],
   babaAfter: [
     { t: 'say', who: 'baba', text: 'ひぇっひぇっ。【共鳴】ねえ……\nふるい 本に 同じ名前の ちからが のっていた 気がするよ。\nさて、なんだったかねえ。' },
   ],
+  babaCh1: [
+    { t: 'say', who: 'baba', text: 'おや、アルディス家の おじょうちゃん。\n水晶に でてるよ。「あなたは いずれ\nハズレくじを ひいた 男と 出会う」……ひぇっひぇっ。' },
+  ],
 
   forest: [
-    { t: 'say', who: 'selena', text: 'こ、こないで！\nわたしだって、アルディス家の むすめです……！' },
-    { t: 'say', who: 'leon', text: 'いた！ あの子か！' },
+    { t: 'say', who: 'leon', text: 'いた……ウルフの むれだ！' },
+    { t: 'say', who: 'leon', text: '（【共鳴】……ためしに つかってみるか？）' },
     { t: 'sfx', name: 'magic' },
     { t: 'flash' },
-    { t: 'say', who: 'selena', text: 'だめ……ちからが あふれて とまらない……！\nいやしの 光が、暴れて……！' },
-    { t: 'say', who: 'leon', text: 'あぶない！ ――その手、つかんで！' },
-    { t: 'sfx', name: 'heal' },
-    { t: 'flash' },
-    { t: 'narr', text: 'レオンが セレナの 手を とった しゅんかん――\nふたりの こころが、しずかに かさなった。' },
-    { t: 'say', who: 'selena', text: 'あれ……？ 光が、おちついていく……。\nあなたの こころ……あったかい。' },
-    { t: 'say', who: 'leon', text: '（これが【共鳴】……？\nこの子の ちからが、手のひらから つたわってくる！）' },
-    { t: 'join', id: 'selena' },
-    { t: 'resonance', id: 'selena' },
-    { t: 'say', who: 'info', text: 'セレナが なかまに くわわった！\nレオンは 共鳴技「ルミナスエッジ」を おもいついた！\n（バトルの「共鳴」コマンドで つかえます）' },
-    { t: 'say', who: 'leon', text: 'いくぞ！ いっしょに！' },
-    { t: 'say', who: 'selena', text: 'はい！' },
-    { t: 'battle', enemies: ['wolf', 'goblin', 'goblin'], boss: true },
+    { t: 'say', who: 'info', text: '……しかし なにも おこらなかった。' },
+    { t: 'say', who: 'leon', text: '（だれかと つながる ちから……\nひとりじゃ 意味が ない、ってことか）\n……なら、剣で やるしかない！' },
+    { t: 'battle', enemies: ['wolf', 'wolf'], boss: true },
     { t: 'flag', name: 'forestDone' },
-    { t: 'say', who: 'selena', text: 'たすけて いただいて、ありがとうございました。\nわたしは セレナ。セレナ・アルディスと もうします。' },
-    { t: 'say', who: 'selena', text: 'アルディス家は……豪商ゴルドーに 財産を\nうばわれて しまいました。\nだから わたし、冒険者に なって 家を たてなおしたくて。' },
-    { t: 'say', who: 'selena', text: 'でも、わたしの いやしの ちからは つよすぎて、\nいつも 暴れてしまうんです。\n……さっき、あなたに ふれるまでは。' },
-    { t: 'say', who: 'leon', text: 'おれの スキル、ランク F なんだけどな。\n「気持ちが すこし かよう」だけの。' },
-    { t: 'say', who: 'selena', text: 'すこし、なんかじゃ ありませんでした。\n……あの、レオンさん。\nよかったら、わたしと いっしょに 旅を してくれませんか？' },
-    { t: 'say', who: 'leon', text: '（前の人生じゃ、こんなふうに だれかと\n組むことなんて なかったな）\n……ああ。よろしくな、セレナ。' },
+    { t: 'say', who: 'leon', text: 'はぁ、はぁ……。\n強く ならなきゃ。\nいつか だれかと、この ちからを つかえる 日まで。' },
     { t: 'fadeOut' },
     { t: 'narr', img: 'eclipse_omen', text: 'その夜――\nルミナの 空に、ほんの いっしゅん、\n黒い 太陽が うかんだ。' },
     { t: 'narr', img: 'eclipse_omen', speaker: 'god', text: '……はじまったね、観測者。\nさあ、見せておくれ。' },
-    { t: 'chapter', no: '序章', title: '完', sub: '第一章「没落令嬢と金の亡者」へ つづく' },
-    { t: 'warp', x: 25, y: 22, dir: 'down' },
+    { t: 'narr', text: '同じ夜。\n世界の あちこちで、\n黒い 太陽を 見上げる 者たちが いた。' },
+    { t: 'narr', text: 'これは、レオンが まだ 知らない\n仲間たちの 物語――' },
+    { t: 'flag', name: 'prologueDone' },
+    { t: 'chapter', no: '序章', title: '完' },
+    { t: 'goto', event: 'ch1Start' },
+  ],
+
+  // ===== 第一章 セレナの章 =====
+  ch1Start: [
+    { t: 'chapter', no: '第一章', title: '没落令嬢の誓い', sub: 'セレナの章' },
+    { t: 'chapterStart', id: 'ch1' },
+    { t: 'flag', name: 'ch1' },
+    { t: 'fadeIn' },
+    { t: 'say', who: 'selena', text: 'この屋敷は わたしません！\n父が のこした たいせつな 家です！' },
+    { t: 'say', who: 'thug', text: '借金の かたに、この屋敷は\nゴルドーさまの ものに なったんだ。\nほら、証文だって ある。' },
+    { t: 'say', who: 'selena', text: 'お父さまが そんな 借金を するはず ありません！\nそれに その署名……お父さまの 字じゃないわ。' },
+    { t: 'say', who: 'thug', text: '文句が あるなら 証拠を もってきな。\n三日後に 屋敷を あけわたして もらうぜ。\nへっへっへ。' },
+    { t: 'flag', name: 'thugsLeft' },
+    { t: 'say', who: 'harold', text: 'お嬢さま……。' },
+    { t: 'say', who: 'selena', text: 'ハロルド。わたし、決めました。\n証文が にせものだという 証拠を さがします。' },
+    { t: 'say', who: 'harold', text: 'では、この老骨も お供いたしましょう。\nアルディス家に 仕えて 四十年。\n剣の腕は まだ さびておりませぬぞ。' },
+    { t: 'say', who: 'info', text: 'ハロルドが いっしょに 戦ってくれる！\n（この章だけの なかまです）' },
+    { t: 'say', who: 'harold', text: 'まずは ルミナの町で うわさを あつめましょう。\n宿屋の 主人は 町いちばんの 情報通ですぞ。' },
+    { t: 'objective', text: 'ルミナの町の 宿屋で うわさを きく' },
+    { t: 'save' },
+  ],
+  innRumor: [
+    { t: 'say', who: 'innkeeper', text: 'おや、アルディス家の おじょうさま。\nゴルドー商会の 連中かい？\nあいつら、夜な夜な 南の 岩山の 洞くつへ\n荷車を はこんでるよ。' },
+    { t: 'say', who: 'innkeeper', text: 'なかで なにを してるのやら。\n…気をつけなよ。 あのへんは さいきん\n魔物も ふえてる。' },
+    { t: 'say', who: 'selena', text: '南の 洞くつ……。 ありがとうございます！' },
+    { t: 'say', who: 'harold', text: '町の 南の 出口を ぬけ、岩山の あいだの 道を\nすすんだ さきですな。 道具屋で ポーションを\nかっておくと よいでしょう。' },
+    { t: 'flag', name: 'heardCave' },
+    { t: 'objective', text: '町の南の 岩山にある 洞くつを しらべる' },
+  ],
+  cave: [
+    { t: 'say', who: 'thug', text: 'ほらよ、ゴルドーさまからの 品だ。\nにせの 証文の 帳簿も いっしょに あずかってくれ。' },
+    { t: 'say', who: 'cultist', text: 'くっくっ……人の 欲が つまった 黒い 結晶。\nわが主も およろこびに なろう。' },
+    { t: 'say', who: 'selena', text: 'そこまでです！\nその帳簿、わたしたちが いただきます！' },
+    { t: 'say', who: 'thug', text: 'げえっ、アルディスの 小娘！' },
+    { t: 'say', who: 'cultist', text: '見られたか。……ちょうど いい。\nこの 結晶の ちから、ためさせて もらおう。\nめざめよ、岩の 巨人！' },
+    { t: 'sfx', name: 'thunder' },
+    { t: 'flash' },
+    { t: 'say', who: 'harold', text: 'お嬢さま、おさがりください！\nこやつは 手ごわい！' },
+    { t: 'battle', enemies: ['golem'], boss: true, hpMul: 2.4 },
+    { t: 'flag', name: 'ch1Boss' },
+    { t: 'say', who: 'info', text: '黒いフードの男は いつのまにか すがたを けし、\nゴルドー商会の 男は にげさった。\nあとには 帳簿と 黒い 石が のこされていた。' },
+    { t: 'say', who: 'selena', text: 'この 帳簿……お父さまの 署名を\nなんども まねた あとが ある！\n証文は やっぱり にせものだったのね！' },
+    { t: 'say', who: 'harold', text: 'お嬢さま、この 黒い石……\nいやな 気配が いたします。\nまるで 人の 欲を かためたような……。' },
+    { t: 'objective', text: '帳簿を もって 東の アルディス家の 屋敷へ もどる' },
+    { t: 'save' },
+  ],
+  manorTalk: [
+    { t: 'say', who: 'harold', text: '屋敷の なかは 差し押さえで からっぽですな。\nいまは 証拠を さがすのが さきですぞ。' },
+  ],
+  manorLocked: [
+    { t: 'say', who: 'info', text: 'りっぱな 屋敷だ。\nとびらには カギが かかっている。' },
+  ],
+  manorEnd: [
+    { t: 'fadeOut' },
+    { t: 'narr', text: 'セレナは 帳簿を ルミナの 役場に とどけた。\nにせの 証文は とりけされ、\n屋敷は アルディス家に もどった――' },
+    { t: 'fadeIn' },
+    { t: 'say', who: 'harold', text: 'ですが お嬢さま、ゴルドーは すでに 町を にげだし、\n東の 商業都市ベルガへ むかったとか。\n大斧を かついだ 大男の 用心棒を つれて……。' },
+    { t: 'say', who: 'selena', text: '……追いかけます。\nあの 黒い石の ことも、きっと ゴルドーが 知っている。' },
+    { t: 'say', who: 'harold', text: '……お嬢さま。この老骨、さきほどの 戦いで\n腰を いためまして。\n……ここで 屋敷を お守りいたします。' },
+    { t: 'say', who: 'selena', text: 'ハロルド……。 いままで ありがとう。\nかならず、もどってきます。' },
+    { t: 'leave', id: 'harold' },
+    { t: 'say', who: 'info', text: 'ハロルドが パーティから はなれた。' },
+    { t: 'fadeOut' },
+    { t: 'narr', img: 'eclipse_omen', text: 'その夜。\n東へ むかう 道の とちゅうで、\nセレナは 空に うかぶ 黒い 太陽を 見た。' },
+    { t: 'narr', img: 'eclipse_omen', speaker: 'god', text: '……ひとりめ。' },
+    { t: 'flag', name: 'ch1Done' },
+    { t: 'chapter', no: '第一章', title: '完', sub: '第二章「ガロの章」へ つづく（じゅんびちゅう）' },
+    { t: 'warp', x: 55, y: 18, dir: 'down' },
     { t: 'healAll' },
     { t: 'fadeIn' },
-    { t: 'flag', name: 'prologueDone' },
-    { t: 'objective', text: '第一章は じゅんびちゅう。町の外で レベルを あげよう' },
+    { t: 'objective', text: '第二章は じゅんびちゅう。セレナで 自由に 冒険できます' },
     { t: 'save' },
-    { t: 'say', who: 'info', text: '（序章クリア！ ここまでの きろくを セーブしました）' },
+    { t: 'say', who: 'info', text: '（第一章クリア！ ここまでの きろくを セーブしました）' },
   ],
 };

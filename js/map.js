@@ -76,6 +76,7 @@ function genMap(seed = 20261022) {
     if (x === 0 || y === 0 || x === MAP_W - 1 || y === MAP_H - 1) map[y][x] = T.WATER;
   }
   buildTownGround(map);
+  buildWorldExtras(map);
   return map;
 }
 
@@ -121,6 +122,19 @@ const TOWN_OBJECTS = [
       [28, 27], [29, 28], [36, 27], [35, 28], [21, 32], [43, 32], [27, 32], [38, 32], [21, 27], [43, 27]].map(([x, y]) => ({ kind: 'tree', x, y })),
   ...[[23, 23], [28, 23], [37, 23], [42, 23], [23, 26], [42, 26], [31, 26], [34, 26], [31, 16], [34, 16]].map(([x, y]) => ({ kind: 'lamp', x, y })),
 ];
+
+// 町の外の舞台（アルディス家の屋敷、南の洞くつ）
+function buildWorldExtras(map) {
+  for (let x = 50; x <= 60; x++) for (let y = 12; y <= 20; y++) map[y][x] = T.GRASS; // 屋敷の敷地
+  for (let y = 18; y <= 23; y++) map[y][55] = T.PATH;
+  for (let x = 27; x <= 31; x++) map[38][x] = T.PATH;                               // 洞くつへの道
+}
+TOWN_OBJECTS.push(
+  { kind: 'building', id: 'manor', x: 53, y: 14, w: 6, h: 4, door: 2, style: 'manor' },
+  { kind: 'cave', id: 'cave', x: 27, y: 36, w: 2, h: 2, text: 'くらい 洞くつだ。\nおくから つめたい 風が ふいてくる…。' },
+  { kind: 'sign', x: 56, y: 19, text: 'アルディス家' },
+  ...[[51, 13], [52, 16], [59, 13], [60, 16], [51, 19], [60, 19]].map(([x, y]) => ({ kind: 'tree', x, y })),
+);
 
 function inTown(x, y) { return x >= TOWN.x0 && x <= TOWN.x1 && y >= TOWN.y0 && y <= TOWN.y1; }
 

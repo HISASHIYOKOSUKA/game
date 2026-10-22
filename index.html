@@ -148,6 +148,7 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
 #menu .win { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 10px; gap: 10px; }
 .menu-head { display: flex; justify-content: space-between; align-items: baseline; }
 .menu-head h2 { margin: 0; font-size: 18px; font-weight: normal; letter-spacing: .1em; }
+.menu-head h2 small { font-size: 12px; color: var(--gold); letter-spacing: .05em; margin-left: 6px; }
 #menu-gold { color: var(--gold); }
 .menu-scroll { flex: 1; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 .card { display: flex; gap: 8px; padding: 8px; background: rgba(5,12,32,.45); border: 1px solid rgba(143,184,255,.35); border-radius: 4px; }
@@ -275,7 +276,7 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
 
   <div id="menu" class="overlay" hidden>
     <div class="win">
-      <div class="menu-head"><h2>メニュー</h2><span id="menu-gold">0 G</span></div>
+      <div class="menu-head"><h2>メニュー <small id="menu-chapter"></small></h2><span id="menu-gold">0 G</span></div>
       <div class="menu-scroll">
         <div id="menu-status"></div>
         <div class="sec-title">キャラクターを タップすると そうびを かえられます</div>
@@ -328,7 +329,7 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
       <button id="btn-new" class="btn">はじめから</button>
       <button id="btn-continue" class="btn" hidden>つづきから</button>
     </div>
-    <p class="title-note">序章まで遊べます。音が出ます。</p>
+    <p class="title-note">序章と第一章（セレナの章）まで遊べます。音が出ます。</p>
   </div>
 
   <div id="talk" class="overlay" hidden>
