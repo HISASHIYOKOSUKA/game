@@ -11,9 +11,9 @@ const SPEAKERS = {
   cultist: { name: '黒いフードの男', face: 'cultist_face' },
   god:     { name: '？？？', face: 'lucifer_face' },
   ren:     { name: '蓮' },
-  mom:     { name: 'レオンの母さん' },
-  baba:    { name: '占いばば' },
-  innkeeper: { name: '宿屋の主人' },
+  mom:     { name: 'レオンの母さん', face: 'mom_face' },
+  baba:    { name: '占いばば', face: 'baba_face' },
+  innkeeper: { name: '宿屋の主人', face: 'innkeeper_face' },
   info:    { name: '' },
 };
 
@@ -48,25 +48,43 @@ const TRIGGERS = [
 
 // 建物などにぶつかると始まるイベント（上から順に条件を見る。合うものがなければ通常の動作）
 const DOOR_EVENTS = {
-  house1: [
-    { when: { flag: 'ch1' }, event: 'momCh1' },
-    { when: { not: 'appraised' }, event: 'momBefore' },
-    { event: 'momAfter' },
-  ],
-  house2: [
-    { when: { flag: 'ch1' }, event: 'babaCh1' },
-    { when: { not: 'appraised' }, event: 'baba' },
-    { event: 'babaAfter' },
-  ],
-  inn: [
-    { when: { flag: 'ch1', not: 'heardCave' }, event: 'innRumor' },
-  ],
   manor: [
     { when: { flag: 'ch1Boss', not: 'ch1Done' }, event: 'manorEnd' },
     { when: { flag: 'ch1' }, event: 'manorTalk' },
     { event: 'manorLocked' },
   ],
 };
+
+// 人に話しかけると始まるイベント（合うものがなければ、店や宿屋の通常の動作／ふつうの会話）
+const TALK_EVENTS = {
+  mom: [
+    { when: { flag: 'ch1' }, event: 'momCh1' },
+    { when: { not: 'appraised' }, event: 'momBefore' },
+    { event: 'momAfter' },
+  ],
+  baba: [
+    { when: { flag: 'ch1' }, event: 'babaCh1' },
+    { when: { not: 'appraised' }, event: 'baba' },
+    { event: 'babaAfter' },
+  ],
+  innkeeper: [
+    { when: { flag: 'ch1', not: 'heardCave' }, event: 'innRumor' },
+  ],
+};
+
+// 町を歩く人たち。lines は話しかけるたびに順番に返す。chLines は章ごとのセリフ
+const TOWN_NPCS = [
+  { id: 'v1', sprite: 'villager', x: 30, y: 19, roam: 3, lines: ['ルミナの 噴水の 水は、のむと\n3びょう だけ かしこく なるらしい。', '……2びょうだったかな。'] },
+  { id: 'v2', sprite: 'girl', x: 35, y: 23, roam: 3, lines: ['西の森には ウルフ、南の岩山には ゴーレム……\n冒険者って たいへんね。'],
+    chLines: { ch1: ['セレナさま！ お屋敷、だいじょうぶ？\nゴルドー商会の 人たち、こわい顔してたわ。'] } },
+  { id: 'v3', sprite: 'oldman', x: 27, y: 25, roam: 2, lines: ['わしが わかいころは、黒い 太陽なんて\n迷信じゃと 思っとった。', 'ふぉっふぉっ。 いまは どうかのう。'] },
+  { id: 'v4', sprite: 'kid', x: 33, y: 28, roam: 4, scale: 0.8, lines: ['ねえねえ、ダッシュボタンって しってる？\nおすと はやく はしれるんだよ！'] },
+  { id: 'v5', sprite: 'merchant', x: 38, y: 24, roam: 3, lines: ['町の外の 魔物は 目に 見えるんだ。\nぶつかると バトルに なるぞ。', 'にげても すこしの あいだは\nおってこない。 そのすきに はなれな。'] },
+  { id: 'v6', sprite: 'guard', x: 34, y: 15, roam: 1, lines: ['ルミナ城の 門は いま とじている。\n王さまの ごめいれいでね。', '……おれも 理由は しらないんだ。'] },
+  { id: 'v7', sprite: 'lady', x: 26, y: 22, roam: 2, lines: ['宿屋の シチューは ルミナいち。\nとまったら ぜひ たべてね。'] },
+  { id: 'v8', sprite: 'traveler', x: 42, y: 25, roam: 2, lines: ['東の 商業都市ベルガ？\nゴルドーって 金持ちが 牛耳ってるって うわさだ。'],
+    chLines: { ch1: ['ゴルドーの やつ、こんどは 貴族の 屋敷まで\nねらってるらしい。 ひどい 話さ。'] } },
+];
 
 // 章ごとの出だし（パーティ・お金・持ち物・開始位置）
 const CHAPTERS = {
@@ -89,7 +107,7 @@ const EVENTS = {
     { t: 'narr', img: 'lucifer_art', speaker: 'god', text: 'ふふ。それで じゅうぶんさ。\n――見せておくれ。\n人が、守るに 値するかどうかを。' },
     { t: 'flash' },
     { t: 'chapter', no: '序章', title: 'ハズレスキルの剣士', sub: 'レオンの章' },
-    { t: 'warp', x: 24, y: 15, dir: 'down' },
+    { t: 'warp', area: 'house1', x: 6, y: 3, dir: 'down' },
     { t: 'fadeIn' },
     { t: 'say', who: 'leon', text: '（……ここは ルミナの町。\nおれは レオン、17さい。\nそして まえは 相馬 蓮だった）' },
     { t: 'say', who: 'leon', text: '（ほんとうに 生まれかわったんだ。\n三日も 熱を だして、いま ぜんぶ おもいだした）' },
@@ -100,7 +118,7 @@ const EVENTS = {
   ],
 
   momBefore: [
-    { t: 'say', who: 'mom', text: 'まだ いってないの？ 占いの館は 町の 東がわ、\nみどりの 屋根の いえよ。' },
+    { t: 'say', who: 'mom', text: 'まだ いってないの？ 占いの館は 町の 東がわ、\nみどりの 屋根の いえよ。\n（家を でたら 右へ すすんでね）' },
   ],
   momAfter: [
     { t: 'say', who: 'mom', text: 'ランク F？ いいじゃないの。\n母さんなんて【にんじんを きれいに むける】よ。\nさ、むりは しないでね。' },

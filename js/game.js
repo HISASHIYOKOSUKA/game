@@ -39,12 +39,32 @@ function recolor(img, tone) {
   const d = c.getImageData(0, 0, cv.width, cv.height), a = d.data;
   for (let i = 0; i < a.length; i += 4) {
     const r = a[i], g = a[i + 1], b = a[i + 2], l = r * 0.3 + g * 0.59 + b * 0.11;
-    if (tone === 'old') { a[i] = l * 0.65 + r * 0.35 + 12; a[i + 1] = l * 0.65 + g * 0.35 + 8; a[i + 2] = l * 0.65 + b * 0.35; }
+    if (typeof tone === 'object') {
+      let [h, sa, li] = rgb2hsl(r, g, b);
+      const cool = sa > 0.12 && (h > 70 && h < 330); // 服など。肌や茶髪（暖色）は変えない
+      if (cool) h = (h + (tone.hue || 0) + 360) % 360;
+      if (tone.sat !== undefined && cool) sa *= tone.sat;
+      li = Math.min(1, li + (tone.light || 0) / 255);
+      [a[i], a[i + 1], a[i + 2]] = hsl2rgb(h, sa, li);
+    } else if (tone === 'old') { a[i] = l * 0.65 + r * 0.35 + 12; a[i + 1] = l * 0.65 + g * 0.35 + 8; a[i + 2] = l * 0.65 + b * 0.35; }
     else if (tone === 'dark') { a[i] = r * 0.55 + 25; a[i + 1] = g * 0.4 + 10; a[i + 2] = b * 0.55 + 35; }
     else if (tone === 'crimson') { a[i] = Math.max(r, b) * 0.9 + 20; a[i + 1] = g * 0.45; a[i + 2] = r * 0.4 + 10; }
   }
   c.putImageData(d, 0, 0);
   return cv;
+}
+function rgb2hsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+  if (mx === mn) return [0, 0, l];
+  const d = mx - mn, s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+  let h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, s, l];
+}
+function hsl2rgb(h, s, l) {
+  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return [f(0) * 255, f(8) * 255, f(4) * 255];
 }
 function makeVariants() {
   const keys = ['face', 'stand0', 'stand1', 'stand2', 'stand3', 'walk0', 'walk1', 'walk2', 'walk3', 'walk4', 'battle0', 'battle1', 'battle2', 'battle3'];
@@ -192,7 +212,7 @@ function saveGame() {
   for (const id in G.roster) roster[id] = packMember(G.roster[id]);
   const data = {
     v: 2, roster, partyIds: G.party.map(m => m.id), stash: G.stash, chapterId: G.chapterId,
-    items: G.items, bag: G.bag, gold: G.gold, flags: G.flags, reso: G.reso, objective: G.objective, x: G.pos[0].x, y: G.pos[0].y,
+    items: G.items, bag: G.bag, gold: G.gold, flags: G.flags, reso: G.reso, objective: G.objective, area: G.area, x: G.pos[0].x, y: G.pos[0].y,
   };
   return storageSet(SAVE_KEY, JSON.stringify(data));
 }
@@ -213,6 +233,7 @@ function loadGame() {
     G.objective = d.objective || '';
     G.map = genMap();
     setupWorld();
+    G.area = d.area && G.areas[d.area] ? d.area : 'world';
     resetPositions(d.x, d.y);
     return true;
   } catch (e) { return false; }
@@ -245,11 +266,12 @@ function drawTree(c, cx, by, s) {
   c.fillStyle = '#5cb45c'; blobs.forEach(([x, y, rr]) => { c.beginPath(); c.arc(cx + x * s - 1, by + y * s - 1.5, rr * s * 0.65, 0, 7); c.fill(); });
   c.fillStyle = '#88d478'; c.beginPath(); c.arc(cx - 2 * s, by - 14 * s, 2 * s, 0, 7); c.fill();
 }
-function makeTile(type, variant, frame) {
-  const key = type + ':' + variant + ':' + frame;
+function makeTile(type, variant, frame, style) {
+  const key = type + ':' + variant + ':' + frame + ':' + (style || '');
   if (tileCache[key]) return tileCache[key];
   const cv = document.createElement('canvas'); cv.width = cv.height = TILE;
   const c = cv.getContext('2d');
+  if (type >= T.IFLOOR) { drawInteriorTile(c, type, variant, INTERIORS[style]); tileCache[key] = cv; return cv; }
   const r = tileRng(type * 31 + variant * 7 + 1);
   switch (type) {
     case T.GRASS: case T.CASTLE: drawGrassBase(c, r, false); break;
@@ -391,9 +413,9 @@ function makeCastle() {
 // ============================================================
 const field = { cv: null, ctx: null, W: 352, H: 352, moving: false, t: 0, speed: 0, anim: 0, input: null, dash: false, lastTs: 0 };
 const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
-const ENCOUNTER_RATE = { [T.GRASS]: 20, [T.FLOWER]: 20, [T.FOREST]: 11, [T.SAND]: 24, [T.PATH]: 48, [T.BRIDGE]: 0 };
 
 function zoneAt(x, y) {
+  if (G.area && G.area !== 'world') return { name: cur().name, danger: 0, table: [], max: 0 };
   if (inTown(x, y)) return { name: TOWN.name, danger: 0, table: [], max: 0 };
   const d = Math.hypot(x - TOWN.cx, y - TOWN.cy);
   return ZONES.find(z => d <= z.maxDist);
@@ -420,24 +442,74 @@ function spriteFor(id, dir, step) {
 }
 
 // 町のオブジェクトと当たり判定を用意する
-function setupWorld() {
-  G.objects = buildTownObjects(castleSprite);
-  G.solid = Array.from({ length: MAP_H }, () => new Array(MAP_W).fill(null));
-  for (const o of G.objects) {
-    for (let y = o.y + (o.solidFrom || 0); y < o.y + o.h; y++) for (let x = o.x; x < o.x + o.w; x++) G.solid[y][x] = o;
+// ============================================================
+// エリア（フィールドと建物の中）
+// ============================================================
+const cur = () => G.areas[G.area];
+
+function makeSolid(area) {
+  area.solid = Array.from({ length: area.h }, () => new Array(area.w).fill(null));
+  for (const o of area.objects) {
+    for (let y = o.y + (o.solidFrom || 0); y < o.y + o.h; y++) for (let x = o.x; x < o.x + o.w; x++) area.solid[y][x] = o;
   }
+}
+function setupWorld() {
+  const world = { id: 'world', name: 'フィールド', interior: false, map: G.map, w: MAP_W, h: MAP_H, objects: buildTownObjects(castleSprite), npcs: [] };
+  makeSolid(world);
+  G.areas = { world };
+  for (const id in INTERIORS) { const a = buildInterior(id); makeSolid(a); G.areas[id] = a; }
+  // 町を歩く人
+  G.walkers = TOWN_NPCS.map(n => Object.assign({ dir: 'down', fx: n.x, fy: n.y, t: 1, moving: false, wait: rand(500, 2500), hx: n.x, hy: n.y, line: 0 }, n));
+  G.mobs = [];
+  G.area = 'world';
+}
+
+// エリア内の (x,y) にいる人・魔物
+function entityAt(x, y, except) {
+  const a = cur();
+  if (G.area === 'world') {
+    const n = npcAt(x, y);
+    if (n && n !== except) return { type: 'story', e: n };
+    const w = G.walkers.find(w => w !== except && ((w.x === x && w.y === y) || (w.moving && w.fx === x && w.fy === y)));
+    if (w) return { type: 'walker', e: w };
+    const m = G.mobs.find(m => m !== except && m.x === x && m.y === y);
+    if (m) return { type: 'mob', e: m };
+  } else {
+    const n = a.npcs.find(n => n !== except && n.x === x && n.y === y);
+    if (n) return { type: 'indoor', e: n };
+  }
+  return null;
+}
+function partyAt(x, y) { return G.pos.some(p => p.x === x && p.y === y); }
+function freeTile(x, y, except) {
+  const a = cur();
+  if (x < 0 || y < 0 || x >= a.w || y >= a.h) return false;
+  if (!isWalkable(a.map[y][x]) || a.solid[y][x]) return false;
+  return !entityAt(x, y, except) && !partyAt(x, y);
 }
 
 function tryMove(dir) {
+  const a = cur();
   const lead = G.pos[0];
   lead.dir = dir;
   const [dx, dy] = DIRS[dir];
   const nx = lead.x + dx, ny = lead.y + dy;
-  if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) return false;
-  const obj = G.solid[ny][nx];
+  if (nx < 0 || ny < 0 || nx >= a.w || ny >= a.h) return false;
+  const obj = a.solid[ny][nx];
   if (obj) { field.input = null; interact(obj, nx, ny); return false; }
-  if (npcAt(nx, ny)) { field.input = null; return false; }
-  const t = G.map[ny][nx];
+  const ent = entityAt(nx, ny);
+  if (ent) {
+    if (ent.type === 'mob') { touchMob(ent.e); return false; }
+    field.input = null;
+    talkTo(ent);
+    return false;
+  }
+  const t = a.map[ny][nx];
+  if (t === T.ICOUNTER) { // カウンターごしに話す
+    const behind = entityAt(nx + dx, ny + dy);
+    if (behind) { field.input = null; talkTo(behind); }
+    return false;
+  }
   if (!isWalkable(t)) return false;
   // 隊列：後ろのメンバーは前のメンバーがいた位置へ
   for (let i = G.pos.length - 1; i >= 1; i--) {
@@ -456,16 +528,15 @@ function tryMove(dir) {
 async function interact(o, x, y) {
   if (G.mode !== 'field') return;
   if (o.kind === 'building' && (x !== o.doorTile.x || y !== o.doorTile.y)) return; // 壁にぶつかっただけ
-  const ev = o.id && (DOOR_EVENTS[o.id] || []).find(d => condOk(d.when));
-  if (ev) { Sfx.play('ok'); await runEvent(ev.event); return; }
-  if (o.kind === 'building') {
-    G.mode = 'busy';
-    Sfx.play('ok');
-    if (SHOPS[o.id]) await openShop(o.id);
-    else if (o.id === 'inn') await visitInn();
-    else G.mode = 'field';
+  if (o.counter) { // 水晶の台などは むこうの人と話す
+    const lead = G.pos[0];
+    const behind = entityAt(x + (x - lead.x), y + (y - lead.y));
+    if (behind) talkTo(behind);
     return;
   }
+  const ev = o.id && (DOOR_EVENTS[o.id] || []).find(d => condOk(d.when));
+  if (ev) { Sfx.play('ok'); await runEvent(ev.event); return; }
+  if (o.kind === 'building' && G.areas[o.id]) { await enterArea(o.id); return; }
   if (!o.text) return;
   G.mode = 'busy';
   Sfx.play('cursor');
@@ -473,8 +544,61 @@ async function interact(o, x, y) {
   G.mode = 'field';
 }
 
+async function enterArea(id) {
+  G.mode = 'busy'; field.input = null;
+  Sfx.play('ok');
+  await fade(true, 220);
+  const a = G.areas[id];
+  G.area = id;
+  resetPositions(a.exit.x, a.exit.y - 1);
+  G.pos.forEach(p => p.dir = 'up');
+  updateHud();
+  await fade(false, 220);
+  G.mode = 'field';
+}
+async function exitArea() {
+  G.mode = 'busy'; field.input = null;
+  const from = G.area;
+  await fade(true, 220);
+  G.area = 'world';
+  const b = cur().objects.find(o => o.kind === 'building' && o.id === from);
+  resetPositions(b.doorTile.x, b.doorTile.y + 1);
+  G.pos.forEach(p => p.dir = 'down');
+  G.safeSteps = 2;
+  updateHud();
+  await fade(false, 220);
+  G.mode = 'field';
+}
+
+// 人に話しかける
+async function talkTo(ent) {
+  if (G.mode !== 'field') return;
+  const n = ent.e;
+  const lead = G.pos[0];
+  n.dir = lead.x < n.x ? 'left' : lead.x > n.x ? 'right' : lead.y < n.y ? 'up' : 'down';
+  const ev = (TALK_EVENTS[n.id] || []).find(d => condOk(d.when));
+  if (ev) { Sfx.play('ok'); await runEvent(ev.event); return; }
+  G.mode = 'busy';
+  Sfx.play('cursor');
+  if (n.role === 'shop') { await openShop(n.shop); return; }
+  if (n.role === 'inn') { await visitInn(); return; }
+  const lines = (n.chLines && n.chLines[G.chapterId]) || n.lines;
+  if (lines) {
+    const idx = n.line || 0;
+    const text = lines[idx % lines.length];
+    n.line = idx + 1;
+    G.eventRunning = true;
+    await talk(VARIANTS[n.sprite] ? n.sprite : n.id, text, n.name || '町の人');
+    G.eventRunning = false;
+  }
+  G.mode = 'field';
+}
+
 async function visitInn() {
-  const r = await dialog(`${INN.name}へ ようこそ！\nひとばん ${INN.price}G です。 とまっていきますか？\n（セーブもします）`, ['とまる', 'やめる']);
+  G.eventRunning = true;
+  await talk('innkeeper', `${INN.name}へ ようこそ！\nひとばん ${INN.price}G です。`);
+  G.eventRunning = false;
+  const r = await dialog(`とまっていきますか？（セーブもします）`, ['とまる', 'やめる']);
   if (r === 0) {
     if (G.gold < INN.price) {
       await dialog('…おや、おかねが たりないみたいですね。\nまた きてくださいな。', ['とじる']);
@@ -496,17 +620,111 @@ async function visitInn() {
 function onArrive() {
   G.steps++;
   const lead = G.pos[0];
-  const t = G.map[lead.y][lead.x];
+  const a = cur();
   updateHud();
+  if (a.interior) {
+    if (a.map[lead.y][lead.x] === T.IMAT) exitArea();
+    return;
+  }
   const trig = TRIGGERS.find(tr => lead.x >= tr.x0 && lead.x <= tr.x1 && lead.y >= tr.y0 && lead.y <= tr.y1 && condOk(tr.when));
   if (trig) { runEvent(trig.event); return; }
-  if (inTown(lead.x, lead.y)) return;
-  if (G.safeSteps > 0) { G.safeSteps--; return; }
-  const rate = ENCOUNTER_RATE[t] || 0;
-  if (rate && Math.random() < 1 / rate) {
-    const zone = zoneAt(lead.x, lead.y);
-    startBattle(rollEncounter(zone));
+  if (G.safeSteps > 0) G.safeSteps--;
+}
+
+// ============================================================
+// 町の人・シンボルの魔物の動き
+// ============================================================
+function stepEntity(e, dt, dur) {
+  if (!e.moving) return false;
+  e.t += dt / dur;
+  if (e.t >= 1) { e.t = 1; e.moving = false; e.fx = e.x; e.fy = e.y; return true; }
+  return false;
+}
+function startStep(e, dir) {
+  const [dx, dy] = DIRS[dir];
+  e.dir = dir;
+  e.fx = e.x; e.fy = e.y; e.x += dx; e.y += dy; e.t = 0; e.moving = true;
+}
+const DIR_LIST = ['up', 'down', 'left', 'right'];
+
+function updateWalkers(dt) {
+  for (const w of G.walkers) {
+    stepEntity(w, dt, 420);
+    if (w.moving) continue;
+    w.wait -= dt;
+    if (w.wait > 0) continue;
+    w.wait = rand(900, 2800);
+    const dir = pick(DIR_LIST);
+    const [dx, dy] = DIRS[dir];
+    const nx = w.x + dx, ny = w.y + dy;
+    if (Math.abs(nx - w.hx) > w.roam || Math.abs(ny - w.hy) > w.roam) { w.dir = dir; continue; }
+    if (freeTile(nx, ny, w) && inTown(nx, ny)) startStep(w, dir); else w.dir = dir;
   }
+}
+
+const MOB_COUNT = 18;
+const MOB_TILES = new Set([T.GRASS, T.FLOWER, T.FOREST, T.SAND, T.PATH]);
+function mobTileOk(x, y) {
+  const a = G.areas.world;
+  if (x < 1 || y < 1 || x >= a.w - 1 || y >= a.h - 1) return false;
+  if (x >= TOWN.x0 - 1 && x <= TOWN.x1 + 1 && y >= TOWN.y0 - 1 && y <= TOWN.y1 + 1) return false;
+  return MOB_TILES.has(a.map[y][x]) && !a.solid[y][x];
+}
+function spawnMob(farFromPlayer = true) {
+  const lead = G.pos[0];
+  for (let tries = 0; tries < 60; tries++) {
+    const x = ri(1, MAP_W - 2), y = ri(1, MAP_H - 2);
+    if (!mobTileOk(x, y) || entityAt(x, y) || partyAt(x, y)) continue;
+    if (farFromPlayer && Math.hypot(x - lead.x, y - lead.y) < 9) continue;
+    const group = rollEncounter(zoneAt(x, y));
+    G.mobs.push({ group, x, y, fx: x, fy: y, t: 1, moving: false, dir: 'left', wait: rand(300, 1500), stun: 0 });
+    return;
+  }
+}
+function updateMobs(dt) {
+  if (G.area !== 'world') return;
+  G.mobTimer = (G.mobTimer || 0) - dt;
+  if (G.mobs.length < MOB_COUNT && G.mobTimer <= 0) { spawnMob(); G.mobTimer = G.mobs.length < MOB_COUNT / 2 ? 200 : 4000; }
+  if (G.invuln > 0) G.invuln -= dt;
+  const lead = G.pos[0];
+  for (const m of G.mobs) {
+    if (m.stun > 0) m.stun -= dt;
+    const chasing = m.stun <= 0 && Math.abs(m.x - lead.x) + Math.abs(m.y - lead.y) <= 5;
+    stepEntity(m, dt, chasing ? 330 : 520);
+    if (m.moving) continue;
+    m.wait -= dt;
+    if (m.wait > 0) continue;
+    const metal = m.group[0] === 'metalslime';
+    let dirs;
+    if (chasing) {
+      const dx = Math.sign(lead.x - m.x) * (metal ? -1 : 1), dy = Math.sign(lead.y - m.y) * (metal ? -1 : 1);
+      const hx = dx > 0 ? 'right' : 'left', vy = dy > 0 ? 'down' : 'up';
+      const prefH = Math.abs(lead.x - m.x) >= Math.abs(lead.y - m.y);
+      dirs = [];
+      if (dx && prefH) dirs.push(hx);
+      if (dy) dirs.push(vy);
+      if (dx && !prefH) dirs.push(hx);
+      m.wait = metal ? 120 : 160;
+    } else {
+      dirs = Math.random() < 0.55 ? [pick(DIR_LIST)] : [];
+      m.wait = rand(700, 1600);
+    }
+    for (const dir of dirs) {
+      const [dx, dy] = DIRS[dir];
+      const nx = m.x + dx, ny = m.y + dy;
+      if (nx === lead.x && ny === lead.y && !field.moving) { m.dir = dir; touchMob(m); break; }
+      if (mobTileOk(nx, ny) && !entityAt(nx, ny, m) && !partyAt(nx, ny)) { startStep(m, dir); break; }
+    }
+  }
+}
+
+async function touchMob(m) {
+  if (G.mode !== 'field' || m.stun > 0 || G.invuln > 0) return;
+  field.input = null;
+  const r = await startBattle(m.group);
+  if (r === 'win') G.mobs = G.mobs.filter(x => x !== m);
+  else if (r === 'run') { m.stun = 3000; G.invuln = 1500; }
+  else G.mobs = G.mobs.filter(x => x !== m);
 }
 
 function rollEncounter(zone) {
@@ -523,6 +741,7 @@ function rollEncounter(zone) {
 function updateField(dt) {
   field.anim += dt;
   if (G.mode !== 'field') return;
+  if (G.area === 'world') { updateWalkers(dt); updateMobs(dt); }
   if (field.moving) {
     const dur = field.dash ? 110 : 190;
     field.t += dt / dur;
@@ -536,27 +755,39 @@ function updateField(dt) {
   if (!field.moving && G.mode === 'field' && field.input) tryMove(field.input);
 }
 
+// ============================================================
+// フィールドの描画
+// ============================================================
 function drawField() {
   const c = field.ctx, W = field.W, H = field.H;
+  const a = cur();
   c.setTransform(R, 0, 0, R, 0, 0);
   c.imageSmoothingEnabled = false;
   const t = field.moving ? field.t : 1;
   const posPx = p => ({ x: (p.fx + (p.x - p.fx) * t) * TILE, y: (p.fy + (p.y - p.fy) * t) * TILE });
   const lp = posPx(G.pos[0]);
-  const camX = Math.round(clamp(lp.x + TILE / 2 - W / 2, 0, MAP_W * TILE - W));
-  const camY = Math.round(clamp(lp.y + TILE / 2 - H / 2, 0, MAP_H * TILE - H));
+  const aw = a.w * TILE, ah = a.h * TILE;
+  const camX = aw <= W ? -Math.round((W - aw) / 2) : Math.round(clamp(lp.x + TILE / 2 - W / 2, 0, aw - W));
+  const camY = ah <= H ? -Math.round((H - ah) / 2) : Math.round(clamp(lp.y + TILE / 2 - H / 2, 0, ah - H));
+  if (a.interior) { c.fillStyle = '#0c0a12'; c.fillRect(0, 0, W, H); }
   const frame = Math.floor(field.anim / 500) % 2;
-  const x0 = Math.floor(camX / TILE), y0 = Math.floor(camY / TILE);
-  const x1 = Math.min(MAP_W - 1, Math.ceil((camX + W) / TILE)), y1 = Math.min(MAP_H - 1, Math.ceil((camY + H) / TILE));
+  const x0 = Math.max(0, Math.floor(camX / TILE)), y0 = Math.max(0, Math.floor(camY / TILE));
+  const x1 = Math.min(a.w - 1, Math.ceil((camX + W) / TILE)), y1 = Math.min(a.h - 1, Math.ceil((camY + H) / TILE));
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-    const tt = G.map[y][x];
+    const tt = a.map[y][x];
+    const sx = x * TILE - camX, sy = y * TILE - camY;
+    if (a.interior) {
+      let v = 0;
+      if (tt === T.IWALL) v = y < a.h - 1 && a.map[y + 1][x] !== T.IWALL ? 'face' : 'top';
+      c.drawImage(makeTile(tt, v, 0, a.id), sx, sy);
+      continue;
+    }
     const variant = ((x * 73856093) ^ (y * 19349663)) >>> 0;
     let v = tt === T.WATER || tt === T.BRIDGE ? variant % 3 : variant % 4;
     if (tt === T.FENCE) v = (x === TOWN.x0 || x === TOWN.x1) && y !== TOWN.y0 && y !== TOWN.y1 ? 1 : 0;
-    const sx = x * TILE - camX, sy = y * TILE - camY;
     c.drawImage(makeTile(tt, v, tt === T.WATER || tt === T.BRIDGE ? frame : 0), sx, sy);
     if (tt === T.WATER) { // 岸の白波
-      const land = (xx, yy) => xx >= 0 && yy >= 0 && xx < MAP_W && yy < MAP_H && G.map[yy][xx] !== T.WATER && G.map[yy][xx] !== T.BRIDGE;
+      const land = (xx, yy) => xx >= 0 && yy >= 0 && xx < a.w && yy < a.h && a.map[yy][xx] !== T.WATER && a.map[yy][xx] !== T.BRIDGE;
       c.fillStyle = frame ? '#ffffff' : '#d8f0ff';
       if (land(x, y - 1)) c.fillRect(sx, sy, TILE, 2);
       if (land(x, y + 1)) c.fillRect(sx, sy + TILE - 2, TILE, 2);
@@ -564,23 +795,31 @@ function drawField() {
       if (land(x + 1, y)) c.fillRect(sx + TILE - 2, sy, 2, TILE);
     }
   }
-  // 画面内のオブジェクトとキャラクターを、足元の y 座標順に描く
+  // 画面内のオブジェクト・人・魔物・パーティを、足元の y 座標順に描く
   const list = [];
-  for (const o of G.objects) {
+  for (const o of a.objects) {
     const ox = o.x * TILE - camX, base = (o.y + o.h) * TILE - camY;
     if (ox > W + 64 || ox + o.w * TILE < -64 || base < -16 || base - o.sprite.height > H + 16) continue;
     list.push({ base, draw: () => drawObject(c, o, ox, base) });
   }
   const walkFrame = Math.floor(field.anim / 160) % 2;
-  for (const n of activeNpcs()) {
-    const base = (n.y + 1) * TILE - camY;
-    list.push({ base, draw: () => drawNpc(c, n, n.x * TILE - camX, base) });
+  const ePx = e => ({ x: (e.fx + (e.x - e.fx) * e.t) * TILE - camX, y: (e.fy + (e.y - e.fy) * e.t) * TILE - camY });
+  const people = G.area === 'world' ? [...activeNpcs().map(n => ({ n, x: n.x * TILE - camX, y: n.y * TILE - camY })), ...G.walkers.map(n => ({ n, ...ePx(n) }))]
+    : a.npcs.map(n => ({ n, x: n.x * TILE - camX, y: n.y * TILE - camY }));
+  for (const p of people) {
+    if (p.x < -40 || p.x > W + 40 || p.y < -60 || p.y > H + 40) continue;
+    list.push({ base: p.y + TILE, draw: () => drawNpc(c, p.n, p.x, p.y + TILE, walkFrame) });
+  }
+  if (G.area === 'world') for (const m of G.mobs) {
+    const p = ePx(m);
+    if (p.x < -40 || p.x > W + 40 || p.y < -60 || p.y > H + 40) continue;
+    list.push({ base: p.y + TILE, draw: () => drawMob(c, m, p.x, p.y + TILE) });
   }
   G.pos.forEach((p, i) => {
     const pp = posPx(p);
     list.push({ base: pp.y + TILE - camY - 0.01 * i, draw: () => drawMember(c, p, i, pp, camX, camY, walkFrame) });
   });
-  list.sort((a, b) => a.base - b.base);
+  list.sort((p, q) => p.base - q.base);
   for (const it of list) it.draw();
 }
 
@@ -599,19 +838,42 @@ function drawObject(c, o, ox, base) {
   c.drawImage(spr, ox + (W - spr.width) / 2, base - spr.height);
 }
 
-function drawNpc(c, n, sx, base) {
-  const img = n.monster ? images['mon_' + n.monster] : spriteFor(n.sprite, n.dir, 0);
+function drawNpc(c, n, sx, base, walkFrame = 0) {
+  const img = n.monster ? images['mon_' + n.monster] : spriteFor(n.sprite, n.dir, n.moving ? walkFrame : 0);
   if (!img) return;
-  const h = n.monster ? 30 : 42, w = img.width * h / img.height;
-  const bob = n.monster ? Math.sin(field.anim / 200 + n.x) * 1.5 : 0;
+  const h = (n.monster ? 30 : 42) * (n.scale || 1), w = img.width * h / img.height;
+  const bob = n.monster ? Math.sin(field.anim / 200 + n.x) * 1.5 : (n.moving && walkFrame ? -1 : 0);
   c.fillStyle = 'rgba(0,0,0,0.28)';
-  c.beginPath(); c.ellipse(sx + 16, base - 2, 9, 3.5, 0, 0, 7); c.fill();
+  c.beginPath(); c.ellipse(sx + 16, base - 2, 9 * (n.scale || 1), 3.5, 0, 0, 7); c.fill();
   c.save();
   c.imageSmoothingEnabled = true;
   const flip = n.monster ? true : n.dir === 'right'; // 魔物は右（町の方）を向く
   if (flip) { c.translate(sx + 16, 0); c.scale(-1, 1); c.drawImage(img, -w / 2, base - 2 - h + bob, w, h); }
   else c.drawImage(img, sx + 16 - w / 2, base - 2 - h + bob, w, h);
   c.restore();
+}
+
+function drawMob(c, m, sx, base) {
+  const id = m.group[0];
+  const img = images['mon_' + id];
+  if (!img) return;
+  const big = MONSTERS[id].scale >= 1.1;
+  const h = big ? 40 : 30, w = img.width * h / img.height;
+  const bob = Math.sin(field.anim / 180 + m.x * 3) * 1.5;
+  c.fillStyle = 'rgba(0,0,0,0.3)';
+  c.beginPath(); c.ellipse(sx + 16, base - 2, w * 0.4, 4, 0, 0, 7); c.fill();
+  c.save();
+  if (m.stun > 0 && Math.floor(m.stun / 100) % 2) c.globalAlpha = 0.35;
+  c.imageSmoothingEnabled = true;
+  const flip = m.dir === 'right' ? !MONSTER_FACES_LEFT.has(id) : MONSTER_FACES_LEFT.has(id);
+  if (flip) { c.translate(sx + 16, 0); c.scale(-1, 1); c.drawImage(img, -w / 2, base - 2 - h + bob, w, h); }
+  else c.drawImage(img, sx + 16 - w / 2, base - 2 - h + bob, w, h);
+  c.restore();
+  if (m.group.length > 1) { // 数のバッジ
+    c.fillStyle = OUT; c.fillRect(sx + 22, base - h - 4, 13, 10);
+    c.fillStyle = '#ffd75e'; c.font = '9px "DotGothic16", monospace'; c.textAlign = 'center';
+    c.fillText('×' + m.group.length, sx + 28.5, base - h + 4);
+  }
 }
 
 function drawMember(c, p, i, pp, camX, camY, walkFrame) {
@@ -626,13 +888,15 @@ function drawMember(c, p, i, pp, camX, camY, walkFrame) {
   c.beginPath(); c.ellipse(cx, by, 9, 3.5, 0, 0, 7); c.fill();
   c.save();
   if (!alive(m)) c.globalAlpha = 0.45;
+  if (G.invuln > 0 && Math.floor(G.invuln / 100) % 2) c.globalAlpha = 0.4;
   c.imageSmoothingEnabled = true;
   if (p.dir === 'right') { c.translate(cx, 0); c.scale(-1, 1); c.drawImage(img, -w / 2, by - h + bob, w, h); }
   else c.drawImage(img, cx - w / 2, by - h + bob, w, h);
   c.restore();
   // 森の中では足元を木で隠す
+  const a = cur();
   const tx = Math.round(pp.x / TILE), ty = Math.round(pp.y / TILE);
-  if (G.map[ty] && G.map[ty][tx] === T.FOREST && !moving) {
+  if (!a.interior && a.map[ty] && a.map[ty][tx] === T.FOREST && !moving) {
     const tile = makeTile(T.FOREST, (((tx * 73856093) ^ (ty * 19349663)) >>> 0) % 4, 0);
     c.drawImage(tile, 0, 20, TILE, 12, tx * TILE - camX, ty * TILE + 20 - camY, TILE, 12);
   }
@@ -784,8 +1048,8 @@ function typeText(el, text, overlay) {
     setTimeout(() => overlay.addEventListener('pointerdown', h), 150);
   });
 }
-async function talk(who, text) {
-  const sp = SPEAKERS[who] || { name: who };
+async function talk(who, text, nameOverride) {
+  const sp = SPEAKERS[who] || { name: nameOverride || who, face: images[who + '_face'] ? who + '_face' : null };
   const ov = $('#talk');
   const face = $('#talk-face');
   face.hidden = !sp.face;
@@ -848,6 +1112,7 @@ function startChapter(id) {
     return G.roster[pid];
   });
   G.gold = ch.gold; G.items = { ...ch.items }; G.bag = {};
+  G.area = 'world';
   resetPositions(ch.start.x, ch.start.y);
   G.pos.forEach(p => p.dir = ch.start.dir);
   updateHud();
@@ -895,7 +1160,7 @@ async function doStep(s) {
     case 'wait': return sleep(s.ms);
     case 'flag': G.flags[s.name] = true; return;
     case 'objective': return setObjective(s.text);
-    case 'warp': resetPositions(s.x, s.y); G.pos.forEach(p => p.dir = s.dir || 'down'); return;
+    case 'warp': G.area = s.area || 'world'; resetPositions(s.x, s.y); G.pos.forEach(p => p.dir = s.dir || 'down'); return;
     case 'join': return joinParty(s.id);
     case 'resonance': if (!G.reso.includes(s.id)) G.reso.push(s.id); return;
     case 'healAll': G.party.forEach(m => { m.hp = m.mhp; m.mp = m.mmp; }); return;
@@ -1087,7 +1352,7 @@ const ENEMY_SPOTS = {
 };
 // 戦闘ポーズ（0=待機 1=詠唱 2=攻撃 3=勝利）ごとの [元画像の番号, 左右反転するか]。すべて左向きにそろえる
 const BATTLE_POSES = {
-  leon:   [[0, true], [0, true], [1, true], [3, false]],
+  leon:   [[0, false], [0, false], [1, false], [3, true]],
   selena: [[0, false], [2, false], [2, false], [3, true]],
   garo:   [[0, false], [0, false], [2, false], [1, false]],
   noa:    [[0, false], [2, false], [1, false], [3, false]],
@@ -1646,6 +1911,7 @@ async function defeat() {
   await waitTap();
   G.gold = Math.floor(G.gold / 2);
   G.party.forEach(m => { m.hp = m.mhp; m.mp = m.mmp; });
+  G.area = 'world';
   resetPositions(INN_FRONT.x, INN_FRONT.y);
   await endBattle('lose');
   await dialog('……気がつくと ルミナの町の 宿屋の まえにいた。\n（所持金が はんぶんに なった）', ['OK']);
@@ -2395,7 +2661,7 @@ async function boot() {
   $('#btn-new').onclick = () => start(false);
   $('#btn-continue').onclick = () => start(true);
   requestAnimationFrame(loop);
-  if (location.hash === '#debug') window.__debug = { G, startBattle, field, openShop, runEvent, joinParty };
+  if (location.hash === '#debug') window.__debug = { G, startBattle, field, openShop, runEvent, joinParty, enterArea, spawnMob };
 }
 
 boot();

@@ -33,10 +33,27 @@ const GUESTS = [
 const findBase = id => PARTY_BASE.find(b => b.id === id) || GUESTS.find(b => b.id === id);
 
 // 色替えキャラ：from の画像を tone で塗りなおす
+// tone：文字列は特別な塗り（old=白髪まじり、dark=悪役、crimson=赤ローブ）
+//       { hue, sat, light } は服などの寒色だけ色相をずらす（肌と髪の暖色はそのまま）
 const VARIANTS = {
-  harold:   { from: 'garo', tone: 'old' },
-  thug:     { from: 'garo', tone: 'dark' },
-  cultist:  { from: 'noa',  tone: 'crimson' },
+  harold:    { from: 'garo',   tone: 'old' },
+  thug:      { from: 'garo',   tone: 'dark' },
+  cultist:   { from: 'noa',    tone: 'crimson' },
+  // 町の人
+  gantz:     { from: 'garo',   tone: { hue: -85, sat: 0.9 } },
+  marie:     { from: 'selena', tone: { hue: 110 } },
+  pop:       { from: 'noa',    tone: { hue: 160, light: 10 } },
+  innkeeper: { from: 'leon',   tone: { hue: -95 } },
+  mom:       { from: 'selena', tone: { hue: 150, sat: 0.8 } },
+  baba:      { from: 'selena', tone: 'old' },
+  villager:  { from: 'leon',   tone: { hue: 140 } },
+  girl:      { from: 'selena', tone: { hue: 60 } },
+  oldman:    { from: 'noa',    tone: 'old' },
+  kid:       { from: 'leon',   tone: { hue: -160, light: 8 } },
+  merchant:  { from: 'garo',   tone: { hue: 100 } },
+  guard:     { from: 'garo',   tone: { hue: 0, sat: 0.15, light: 12 } },
+  lady:      { from: 'selena', tone: { hue: -40 } },
+  traveler:  { from: 'noa',    tone: { hue: -150 } },
 };
 
 // target: enemy=敵1体 / enemies=敵全体 / ally=味方1人 / allies=味方全員 / deadally=戦闘不能の味方

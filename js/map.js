@@ -2,7 +2,8 @@
 'use strict';
 
 const T = { WATER: 0, SAND: 1, GRASS: 2, FLOWER: 3, FOREST: 4, MOUNT: 5, PATH: 6, CASTLE: 7, BRIDGE: 8,
-  ROAD: 9, PAVE: 10, FENCE: 11, BED: 12, TGRASS: 13, WALK: 14 };
+  ROAD: 9, PAVE: 10, FENCE: 11, BED: 12, TGRASS: 13, WALK: 14,
+  IFLOOR: 20, IWALL: 21, IMAT: 22, IRUG: 23, ICOUNTER: 24 }; // 20〜は建物の中
 const MAP_W = 64, MAP_H = 48;
 // ルミナの町（柵で囲まれた範囲）
 const TOWN = { name: 'ルミナの町', x0: 20, y0: 11, x1: 44, y1: 33, cx: 32, cy: 22 };
@@ -138,6 +139,6 @@ TOWN_OBJECTS.push(
 
 function inTown(x, y) { return x >= TOWN.x0 && x <= TOWN.x1 && y >= TOWN.y0 && y <= TOWN.y1; }
 
-function isWalkable(t) { return t !== T.WATER && t !== T.MOUNT && t !== T.CASTLE && t !== T.FENCE && t !== T.BED; }
+function isWalkable(t) { return t !== T.WATER && t !== T.MOUNT && t !== T.CASTLE && t !== T.FENCE && t !== T.BED && t !== T.IWALL && t !== T.ICOUNTER; }
 
 if (typeof module !== 'undefined') module.exports = { genMap, T, MAP_W, MAP_H, CASTLE_POS, START_POS, isWalkable, TOWN_OBJECTS, TOWN };
