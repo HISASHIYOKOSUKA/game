@@ -95,12 +95,16 @@ const G = {
   pos: [], steps: 0, safeSteps: 6,
 };
 
+// m.b が素のステータス。m.atk などは装備込みの値（recalc で更新）
 function makeMember(base, lv = 1) {
   const m = {
     id: base.id, name: base.name, base, lv: 1, exp: 0,
-    mhp: base.hp, mmp: base.mp, atk: base.atk, def: base.def, mag: base.mag, spd: base.spd,
+    mhp: base.hp, mmp: base.mp,
+    b: { atk: base.atk, def: base.def, mag: base.mag, spd: base.spd },
+    equip: { ...base.equip },
   };
   for (let i = 1; i < lv; i++) levelUp(m);
+  recalc(m);
   m.hp = m.mhp; m.mp = m.mmp;
   return m;
 }
@@ -108,16 +112,27 @@ function levelUp(m) {
   const g = m.base.grow;
   m.lv++;
   const gains = { hp: g.hp + ri(0, 4), mp: g.mp + ri(0, 1), atk: g.atk + ri(0, 1), def: g.def + ri(0, 1), mag: g.mag + ri(0, 1), spd: g.spd };
-  m.mhp += gains.hp; m.mmp += gains.mp; m.atk += gains.atk; m.def += gains.def; m.mag += gains.mag; m.spd += gains.spd;
+  m.mhp += gains.hp; m.mmp += gains.mp; m.b.atk += gains.atk; m.b.def += gains.def; m.b.mag += gains.mag; m.b.spd += gains.spd;
+  recalc(m);
   return gains;
 }
+function recalc(m) {
+  for (const k of ['atk', 'def', 'mag', 'spd']) {
+    let v = m.b[k];
+    for (const slot in m.equip) { const e = EQUIPS[m.equip[slot]]; if (e && e[k]) v += e[k]; }
+    m[k] = Math.max(1, v);
+  }
+}
+const canEquip = (m, id) => { const w = EQUIPS[id].who; return w === 'all' || w.includes(m.id); };
 const alive = m => m.hp > 0;
 
 function newGame() {
   G.party = PARTY_BASE.map(b => makeMember(b));
   G.items = { ...START_ITEMS };
-  G.gold = 50;
+  G.bag = {};
+  G.gold = START_GOLD;
   G.map = genMap();
+  setupWorld();
   resetPositions(START_POS.x, START_POS.y);
   G.steps = 0;
 }
@@ -128,8 +143,8 @@ function resetPositions(x, y) {
 const SAVE_KEY = 'eclipse-saga-save-v1';
 function saveGame() {
   const data = {
-    party: G.party.map(m => ({ id: m.id, lv: m.lv, exp: m.exp, hp: m.hp, mp: m.mp, mhp: m.mhp, mmp: m.mmp, atk: m.atk, def: m.def, mag: m.mag, spd: m.spd })),
-    items: G.items, gold: G.gold, x: G.pos[0].x, y: G.pos[0].y,
+    party: G.party.map(m => ({ id: m.id, lv: m.lv, exp: m.exp, hp: m.hp, mp: m.mp, mhp: m.mhp, mmp: m.mmp, b: m.b, equip: m.equip })),
+    items: G.items, bag: G.bag, gold: G.gold, x: G.pos[0].x, y: G.pos[0].y,
   };
   return storageSet(SAVE_KEY, JSON.stringify(data));
 }
@@ -138,9 +153,17 @@ function loadGame() {
   if (!raw) return false;
   try {
     const d = JSON.parse(raw);
-    G.party = d.party.map(s => Object.assign(makeMember(PARTY_BASE.find(b => b.id === s.id)), s));
-    G.items = d.items; G.gold = d.gold;
+    G.party = d.party.map(s => {
+      const m = makeMember(PARTY_BASE.find(b => b.id === s.id));
+      if (!s.b) s.b = { atk: s.atk, def: s.def, mag: s.mag, spd: s.spd }; // 旧セーブ
+      Object.assign(m, s);
+      if (!s.equip) m.equip = { ...m.base.equip };
+      recalc(m);
+      return m;
+    });
+    G.items = d.items; G.bag = d.bag || {}; G.gold = d.gold;
     G.map = genMap();
+    setupWorld();
     resetPositions(d.x, d.y);
     return true;
   } catch (e) { return false; }
@@ -155,23 +178,23 @@ function tileRng(seed) { return mulberry32(seed * 9973 + 17); }
 
 function px(c, x, y, w, h, col) { c.fillStyle = col; c.fillRect(x, y, w, h); }
 
-function drawGrassBase(c, r) {
-  px(c, 0, 0, 32, 32, '#5aa83c');
-  for (let i = 0; i < 14; i++) {
-    const x = Math.floor(r() * 31), y = Math.floor(r() * 30);
-    px(c, x, y, 1, 2, r() < 0.5 ? '#4a9232' : '#3f8a2c');
+// MOTHER 風：規則的な草の模様、太い輪郭、明るい色
+function drawGrassBase(c, r, town) {
+  px(c, 0, 0, 32, 32, town ? '#9cd874' : '#86c862');
+  const d = town ? '#7cc05a' : '#68ae4a', l = town ? '#bcec94' : '#a8e080';
+  for (let y = 3, row = 0; y < 32; y += 8, row++) {
+    for (let x = (row % 2) * 8 + 2; x < 32; x += 16) {
+      px(c, x, y, 1, 2, d); px(c, x + 2, y - 1, 1, 3, d); px(c, x + 4, y, 1, 2, d); px(c, x + 2, y - 2, 1, 1, l);
+    }
   }
-  for (let i = 0; i < 6; i++) px(c, Math.floor(r() * 31), Math.floor(r() * 31), 1, 1, '#7cc650');
 }
-function drawTree(c, cx, by, s, r) {
-  px(c, cx - 2, by - 7 * s, 4, 7 * s, '#5b3a1e');
-  px(c, cx - 1, by - 7 * s, 1, 7 * s, '#7a5230');
-  const rad = 8 * s;
-  c.fillStyle = '#183f1c'; c.beginPath(); c.arc(cx, by - 9 * s, rad + 1, 0, 7); c.fill();
-  c.fillStyle = '#2c7a31'; c.beginPath(); c.arc(cx, by - 9 * s, rad, 0, 7); c.fill();
-  c.fillStyle = '#3d9a3c'; c.beginPath(); c.arc(cx - 2 * s, by - 11 * s, rad * 0.6, 0, 7); c.fill();
-  c.fillStyle = '#5cbc4c';
-  for (let i = 0; i < 4; i++) px(c, cx - 5 * s + Math.floor(r() * 6 * s), by - 15 * s + Math.floor(r() * 6 * s), 2, 1, '#5cbc4c');
+function drawTree(c, cx, by, s) {
+  px(c, cx - 2, by - 7 * s, 4, 7 * s, OUT); px(c, cx - 1, by - 7 * s, 2, 6 * s, '#8a5a30');
+  const blobs = [[0, -11, 8], [-5, -8, 5.5], [5, -8, 5.5], [0, -15, 5.5]];
+  c.fillStyle = OUT; blobs.forEach(([x, y, rr]) => { c.beginPath(); c.arc(cx + x * s, by + y * s, rr * s + 1, 0, 7); c.fill(); });
+  c.fillStyle = '#3e9048'; blobs.forEach(([x, y, rr]) => { c.beginPath(); c.arc(cx + x * s, by + y * s, rr * s, 0, 7); c.fill(); });
+  c.fillStyle = '#5cb45c'; blobs.forEach(([x, y, rr]) => { c.beginPath(); c.arc(cx + x * s - 1, by + y * s - 1.5, rr * s * 0.65, 0, 7); c.fill(); });
+  c.fillStyle = '#88d478'; c.beginPath(); c.arc(cx - 2 * s, by - 14 * s, 2 * s, 0, 7); c.fill();
 }
 function makeTile(type, variant, frame) {
   const key = type + ':' + variant + ':' + frame;
@@ -180,60 +203,103 @@ function makeTile(type, variant, frame) {
   const c = cv.getContext('2d');
   const r = tileRng(type * 31 + variant * 7 + 1);
   switch (type) {
-    case T.GRASS: case T.CASTLE: drawGrassBase(c, r); break;
+    case T.GRASS: case T.CASTLE: drawGrassBase(c, r, false); break;
+    case T.TGRASS: drawGrassBase(c, r, true); break;
     case T.FLOWER: {
-      drawGrassBase(c, r);
-      const cols = ['#ffffff', '#ffe066', '#ff8fb8', '#ffffff'];
-      for (let i = 0; i < 5; i++) {
-        const x = 3 + Math.floor(r() * 25), y = 3 + Math.floor(r() * 25), col = pick(cols);
-        px(c, x, y - 1, 1, 1, col); px(c, x - 1, y, 3, 1, col); px(c, x, y + 1, 1, 1, col); px(c, x, y, 1, 1, '#d08a20');
+      drawGrassBase(c, r, false);
+      const cols = ['#ffffff', '#ffe066', '#ff8fb8'];
+      for (const [x, y] of [[6, 8], [20, 6], [12, 20], [26, 22]]) {
+        const col = cols[(x + y + variant) % 3];
+        px(c, x, y - 1, 1, 1, col); px(c, x - 1, y, 3, 1, col); px(c, x, y + 1, 1, 1, col); px(c, x, y, 1, 1, '#e09a20');
       }
       break;
     }
     case T.SAND: {
-      px(c, 0, 0, 32, 32, '#e6d39a');
-      for (let i = 0; i < 18; i++) px(c, Math.floor(r() * 31), Math.floor(r() * 31), 1, 1, r() < 0.5 ? '#d2bb7c' : '#f4e6b8');
+      px(c, 0, 0, 32, 32, '#f0dca0');
+      for (let y = 4, row = 0; y < 32; y += 8, row++) for (let x = (row % 2) * 8 + 3; x < 32; x += 16) { px(c, x, y, 2, 1, '#dcc484'); px(c, x + 4, y + 2, 1, 1, '#fff0c8'); }
       break;
     }
     case T.PATH: {
-      drawGrassBase(c, r);
-      px(c, 0, 3, 32, 26, '#b98d55');
-      px(c, 0, 4, 32, 24, '#cfa368');
-      for (let i = 0; i < 12; i++) px(c, Math.floor(r() * 30), 5 + Math.floor(r() * 21), 2, 1, r() < 0.5 ? '#b48650' : '#dcb47c');
+      px(c, 0, 0, 32, 32, '#e6cc90');
+      for (let y = 4, row = 0; y < 32; y += 7, row++) for (let x = (row % 2) * 6 + 2; x < 32; x += 12) { px(c, x, y, 2, 1, '#cbae70'); px(c, x + 5, y + 3, 1, 1, '#f6e2b0'); }
+      break;
+    }
+    case T.ROAD: { // 石だたみの通り
+      px(c, 0, 0, 32, 32, '#b8b0a8');
+      for (let y = 0, row = 0; y < 32; y += 8, row++) {
+        for (let x = (row % 2) ? -6 : 0; x < 32; x += 12) {
+          px(c, x + 1, y + 1, 10, 6, '#dcd6cc'); px(c, x + 1, y + 1, 10, 1, '#ece8e0'); px(c, x + 1, y + 6, 10, 1, '#c8c0b4');
+        }
+      }
+      break;
+    }
+    case T.PAVE: { // 広場のレンガ
+      px(c, 0, 0, 32, 32, '#c88e6a');
+      for (let y = 0, row = 0; y < 32; y += 6, row++) for (let x = (row % 2) ? -5 : 0; x < 32; x += 10) {
+        px(c, x + 1, y + 1, 8, 4, (row + x) % 3 ? '#f0c098' : '#e8b088'); px(c, x + 1, y + 1, 8, 1, '#ffd8b4');
+      }
+      break;
+    }
+    case T.WALK: { // 草の中の飛び石
+      drawGrassBase(c, r, true);
+      for (const [x, y] of [[4, 4], [17, 12], [5, 20]]) {
+        c.fillStyle = OUT; c.beginPath(); c.ellipse(x + 6, y + 4, 7, 4.5, 0, 0, 7); c.fill();
+        c.fillStyle = '#d8d2c8'; c.beginPath(); c.ellipse(x + 6, y + 4, 6, 3.5, 0, 0, 7); c.fill();
+        px(c, x + 3, y + 2, 4, 1, '#f4f0e8');
+      }
+      break;
+    }
+    case T.FENCE: { // 白い柵。variant 0=横, 1=縦
+      drawGrassBase(c, r, true);
+      if (variant === 0) {
+        px(c, 0, 13, 32, 4, OUT); px(c, 0, 14, 32, 2, '#f8f8f0');
+        px(c, 0, 21, 32, 4, OUT); px(c, 0, 22, 32, 2, '#f8f8f0');
+        for (let x = 1; x < 32; x += 8) {
+          px(c, x, 7, 5, 21, OUT); px(c, x + 1, 8, 3, 19, '#ffffff'); px(c, x + 3, 9, 1, 17, '#d8d8e0');
+          px(c, x + 2, 6, 1, 1, OUT);
+        }
+        px(c, 0, 28, 32, 2, 'rgba(0,0,0,0.15)');
+      } else {
+        px(c, 13, 0, 6, 32, OUT); px(c, 14, 0, 4, 32, '#f8f8f0'); px(c, 17, 0, 1, 32, '#d8d8e0');
+        for (let y = 2; y < 32; y += 10) { px(c, 11, y, 10, 6, OUT); px(c, 12, y + 1, 8, 4, '#ffffff'); }
+      }
+      break;
+    }
+    case T.BED: { // 花壇
+      drawGrassBase(c, r, true);
+      px(c, 1, 8, 30, 22, OUT); px(c, 2, 9, 28, 20, '#c08850'); px(c, 4, 11, 24, 16, '#7a5232');
+      const cols = [['#ff6080', '#ffffff'], ['#ffd84a', '#ff9a30'], ['#a080ff', '#ffffff']][variant % 3];
+      for (let y = 13; y < 26; y += 6) for (let x = 6 + ((y / 6) % 2) * 3; x < 26; x += 6) {
+        px(c, x, y + 2, 1, 3, '#3e9048'); px(c, x - 1, y, 3, 3, cols[0]); px(c, x, y + 1, 1, 1, cols[1]);
+      }
       break;
     }
     case T.WATER: case T.BRIDGE: {
-      px(c, 0, 0, 32, 32, '#2f6fd0');
-      const off = frame * 4;
-      for (let i = 0; i < 6; i++) {
-        const y = (i * 6 + 2) % 32, x = (Math.floor(r() * 24) + off) % 32;
-        px(c, x, y, 6, 1, '#5d98ec'); px(c, (x + 14) % 32, (y + 3) % 32, 4, 1, '#4884e0');
+      px(c, 0, 0, 32, 32, '#5aa8f0');
+      const off = frame * 3;
+      for (let y = 4, row = 0; y < 32; y += 8, row++) for (let x = (row % 2) * 8 + off; x < 40; x += 16) {
+        px(c, (x % 32), y, 5, 1, '#a8d8ff'); px(c, ((x + 5) % 32), y - 1, 2, 1, '#e0f4ff');
       }
       if (type === T.BRIDGE) {
-        px(c, 4, 0, 24, 32, '#7a4e28');
-        for (let y = 0; y < 32; y += 4) { px(c, 4, y, 24, 3, '#a8703c'); px(c, 4, y + 3, 24, 1, '#5b3a1e'); }
-        px(c, 3, 0, 2, 32, '#4a2e16'); px(c, 27, 0, 2, 32, '#4a2e16');
+        px(c, 3, 0, 26, 32, OUT); px(c, 4, 0, 24, 32, '#c08850');
+        for (let y = 0; y < 32; y += 6) { px(c, 4, y, 24, 5, '#d8a068'); px(c, 4, y + 5, 24, 1, '#8a5a30'); }
       }
       break;
     }
     case T.FOREST: {
-      drawGrassBase(c, r);
-      if (variant % 2) { drawTree(c, 9, 30, 0.9, r); drawTree(c, 23, 26, 0.95, r); }
-      else { drawTree(c, 22, 30, 0.9, r); drawTree(c, 10, 25, 0.95, r); }
+      drawGrassBase(c, r, false);
+      if (variant % 2) { drawTree(c, 9, 31, 0.85); drawTree(c, 23, 27, 0.9); }
+      else { drawTree(c, 22, 31, 0.85); drawTree(c, 10, 26, 0.9); }
       break;
     }
-    case T.MOUNT: {
-      drawGrassBase(c, r);
-      const peak = 8 + Math.floor(r() * 10);
-      c.fillStyle = '#3b3229';
-      c.beginPath(); c.moveTo(-1, 31); c.lineTo(peak, 1); c.lineTo(33, 31); c.fill();
-      c.fillStyle = '#9a8670';
-      c.beginPath(); c.moveTo(1, 30); c.lineTo(peak, 3); c.lineTo(31, 30); c.fill();
-      c.fillStyle = '#76644f';
-      c.beginPath(); c.moveTo(peak, 3); c.lineTo(31, 30); c.lineTo(peak + 4, 30); c.fill();
-      c.fillStyle = '#f2f4f8';
-      c.beginPath(); c.moveTo(peak, 3); c.lineTo(peak - 5, 11); c.lineTo(peak - 2, 10); c.lineTo(peak, 12); c.lineTo(peak + 3, 10); c.lineTo(peak + 5, 11); c.fill();
-      for (let i = 0; i < 5; i++) px(c, peak - 6 + Math.floor(r() * 14), 16 + Math.floor(r() * 12), 2, 1, '#665544');
+    case T.MOUNT: { // 岩山
+      drawGrassBase(c, r, false);
+      const peak = 10 + (variant % 3) * 5;
+      c.fillStyle = OUT; c.beginPath(); c.moveTo(0, 31); c.lineTo(3, 18); c.lineTo(peak, 2); c.lineTo(28, 14); c.lineTo(32, 31); c.fill();
+      c.fillStyle = '#c4a47c'; c.beginPath(); c.moveTo(2, 30); c.lineTo(5, 18); c.lineTo(peak, 4); c.lineTo(26, 15); c.lineTo(30, 30); c.fill();
+      c.fillStyle = '#9a7c58'; c.beginPath(); c.moveTo(peak, 4); c.lineTo(26, 15); c.lineTo(30, 30); c.lineTo(peak + 3, 30); c.fill();
+      c.fillStyle = '#e4cca4'; c.beginPath(); c.moveTo(peak, 4); c.lineTo(5, 18); c.lineTo(peak - 2, 14); c.fill();
+      px(c, peak - 4, 20, 5, 1, '#8a6a48'); px(c, peak + 4, 23, 4, 1, '#7a5a3a');
       break;
     }
   }
@@ -279,7 +345,8 @@ const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 const ENCOUNTER_RATE = { [T.GRASS]: 20, [T.FLOWER]: 20, [T.FOREST]: 11, [T.SAND]: 24, [T.PATH]: 48, [T.BRIDGE]: 0 };
 
 function zoneAt(x, y) {
-  const d = Math.hypot(x - (CASTLE_POS.x + 1), y - (CASTLE_POS.y + 1));
+  if (inTown(x, y)) return { name: TOWN.name, danger: 0, table: [], max: 0 };
+  const d = Math.hypot(x - TOWN.cx, y - TOWN.cy);
   return ZONES.find(z => d <= z.maxDist);
 }
 
@@ -303,14 +370,24 @@ function spriteFor(id, dir, step) {
   return images[`${id}_${WALK_FRAMES[dir][step]}`];
 }
 
+// 町のオブジェクトと当たり判定を用意する
+function setupWorld() {
+  G.objects = buildTownObjects(castleSprite);
+  G.solid = Array.from({ length: MAP_H }, () => new Array(MAP_W).fill(null));
+  for (const o of G.objects) {
+    for (let y = o.y + (o.solidFrom || 0); y < o.y + o.h; y++) for (let x = o.x; x < o.x + o.w; x++) G.solid[y][x] = o;
+  }
+}
+
 function tryMove(dir) {
   const lead = G.pos[0];
   lead.dir = dir;
   const [dx, dy] = DIRS[dir];
   const nx = lead.x + dx, ny = lead.y + dy;
   if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) return false;
+  const obj = G.solid[ny][nx];
+  if (obj) { field.input = null; interact(obj, nx, ny); return false; }
   const t = G.map[ny][nx];
-  if (t === T.CASTLE) { enterCastle(); return false; }
   if (!isWalkable(t)) return false;
   // 隊列：後ろのメンバーは前のメンバーがいた位置へ
   for (let i = G.pos.length - 1; i >= 1; i--) {
@@ -326,11 +403,58 @@ function tryMove(dir) {
   return true;
 }
 
+const HOUSE_TALK = {
+  house1: ['おばあさん「おや、レオンじゃないか。 大きくなったねえ。」', 'おばあさん「森の まものは ひがしの草原より つよいよ。 気をつけてね。」'],
+  house2: ['男の子「ぼく、しょうらい ガロさんみたいな 戦士になるんだ！」', '男の子「メタルスライムって しってる？ すぐ にげちゃうけど すごい けいけんちなんだって！」'],
+};
+async function interact(o, x, y) {
+  if (G.mode !== 'field') return;
+  if (o.kind === 'building') {
+    if (x !== o.doorTile.x || y !== o.doorTile.y) return; // 壁にぶつかっただけ
+    G.mode = 'busy';
+    Sfx.play('ok');
+    if (SHOPS[o.id]) await openShop(o.id);
+    else if (o.id === 'inn') await visitInn();
+    else {
+      const talk = HOUSE_TALK[o.id];
+      await dialog(talk[o.talked = ((o.talked ?? -1) + 1) % talk.length], ['とじる']);
+      G.mode = 'field';
+    }
+    return;
+  }
+  if (!o.text) return;
+  G.mode = 'busy';
+  Sfx.play('cursor');
+  await dialog(o.text, ['とじる']);
+  G.mode = 'field';
+}
+
+async function visitInn() {
+  const r = await dialog(`${INN.name}へ ようこそ！\nひとばん ${INN.price}G です。 とまっていきますか？\n（セーブもします）`, ['とまる', 'やめる']);
+  if (r === 0) {
+    if (G.gold < INN.price) {
+      await dialog('…おや、おかねが たりないみたいですね。\nまた きてくださいな。', ['とじる']);
+    } else {
+      G.gold -= INN.price;
+      await fade(true);
+      G.party.forEach(m => { m.hp = m.mhp; m.mp = m.mmp; });
+      const ok = saveGame();
+      updateHud();
+      await sleep(400);
+      await fade(false);
+      Sfx.play('heal');
+      await dialog('おはようございます！ よく ねむれましたか？\nHPとMPが ぜんかいふくした！' + (ok ? '\n（セーブしました）' : '\n（このブラウザでは セーブできません）'), ['とじる']);
+    }
+  }
+  G.mode = 'field';
+}
+
 function onArrive() {
   G.steps++;
   const lead = G.pos[0];
   const t = G.map[lead.y][lead.x];
   updateHud();
+  if (inTown(lead.x, lead.y)) return;
   if (G.safeSteps > 0) { G.safeSteps--; return; }
   const rate = ENCOUNTER_RATE[t] || 0;
   if (rate && Math.random() < 1 / rate) {
@@ -381,46 +505,71 @@ function drawField() {
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
     const tt = G.map[y][x];
     const variant = ((x * 73856093) ^ (y * 19349663)) >>> 0;
-    const v = tt === T.WATER || tt === T.BRIDGE ? variant % 3 : variant % 4;
+    let v = tt === T.WATER || tt === T.BRIDGE ? variant % 3 : variant % 4;
+    if (tt === T.FENCE) v = (x === TOWN.x0 || x === TOWN.x1) && y !== TOWN.y0 && y !== TOWN.y1 ? 1 : 0;
     const sx = x * TILE - camX, sy = y * TILE - camY;
     c.drawImage(makeTile(tt, v, tt === T.WATER || tt === T.BRIDGE ? frame : 0), sx, sy);
     if (tt === T.WATER) { // 岸の白波
       const land = (xx, yy) => xx >= 0 && yy >= 0 && xx < MAP_W && yy < MAP_H && G.map[yy][xx] !== T.WATER && G.map[yy][xx] !== T.BRIDGE;
-      c.fillStyle = frame ? '#cfe6ff' : '#a9d0ff';
+      c.fillStyle = frame ? '#ffffff' : '#d8f0ff';
       if (land(x, y - 1)) c.fillRect(sx, sy, TILE, 2);
       if (land(x, y + 1)) c.fillRect(sx, sy + TILE - 2, TILE, 2);
       if (land(x - 1, y)) c.fillRect(sx, sy, 2, TILE);
       if (land(x + 1, y)) c.fillRect(sx + TILE - 2, sy, 2, TILE);
     }
   }
-  // 城
-  c.drawImage(castleSprite, CASTLE_POS.x * TILE - camX, CASTLE_POS.y * TILE - camY + 64 - 76);
-  // キャラクター（奥から順に）
-  const order = G.pos.map((p, i) => ({ p, i, pp: posPx(p) })).sort((a, b) => a.pp.y - b.pp.y || b.i - a.i);
+  // 画面内のオブジェクトとキャラクターを、足元の y 座標順に描く
+  const list = [];
+  for (const o of G.objects) {
+    const ox = o.x * TILE - camX, base = (o.y + o.h) * TILE - camY;
+    if (ox > W + 64 || ox + o.w * TILE < -64 || base < -16 || base - o.sprite.height > H + 16) continue;
+    list.push({ base, draw: () => drawObject(c, o, ox, base) });
+  }
   const walkFrame = Math.floor(field.anim / 160) % 2;
-  for (const { p, i, pp } of order) {
-    const m = G.party[i];
-    const moving = field.moving && (p.x !== p.fx || p.y !== p.fy);
-    const img = spriteFor(m.id, p.dir, moving ? walkFrame : 0);
-    if (!img) continue;
-    const h = 42, w = img.width * h / img.height;
-    const cx = pp.x + TILE / 2 - camX, by = pp.y + TILE - 2 - camY;
-    const bob = moving && walkFrame ? (p.dir === 'up' || p.dir === 'down' ? -2 : -1) : 0;
-    c.fillStyle = 'rgba(0,0,0,0.28)';
-    c.beginPath(); c.ellipse(cx, by, 9, 3.5, 0, 0, 7); c.fill();
-    c.save();
-    if (!alive(m)) c.globalAlpha = 0.45;
-    const flip = p.dir === 'right';
-    c.imageSmoothingEnabled = true;
-    if (flip) { c.translate(cx, 0); c.scale(-1, 1); c.drawImage(img, -w / 2, by - h + bob, w, h); }
-    else c.drawImage(img, cx - w / 2, by - h + bob, w, h);
-    c.restore();
-    // 森の中では足元を木で隠す
-    const tx = Math.round(pp.x / TILE), ty = Math.round(pp.y / TILE);
-    if (G.map[ty] && G.map[ty][tx] === T.FOREST && !moving) {
-      const tile = makeTile(T.FOREST, (((tx * 73856093) ^ (ty * 19349663)) >>> 0) % 4, 0);
-      c.drawImage(tile, 0, 20, TILE, 12, tx * TILE - camX, ty * TILE + 20 - camY, TILE, 12);
-    }
+  G.pos.forEach((p, i) => {
+    const pp = posPx(p);
+    list.push({ base: pp.y + TILE - camY - 0.01 * i, draw: () => drawMember(c, p, i, pp, camX, camY, walkFrame) });
+  });
+  list.sort((a, b) => a.base - b.base);
+  for (const it of list) it.draw();
+}
+
+function drawObject(c, o, ox, base) {
+  let spr = o.sprite;
+  if (o.frames) spr = o.frames[Math.floor(field.anim / 180) % o.frames.length];
+  const W = o.w * TILE;
+  if (o.kind === 'building') { // 地面の影
+    c.fillStyle = 'rgba(30,40,20,0.22)';
+    c.fillRect(ox + 8, base - 4, W - 4, 8);
+    c.fillRect(ox + W - 4, base - spr.height + 30, 8, spr.height - 26);
+  } else if (o.kind === 'tree' || o.kind === 'lamp' || o.kind === 'sign' || o.kind === 'mailbox') {
+    c.fillStyle = 'rgba(30,40,20,0.25)';
+    c.beginPath(); c.ellipse(ox + 16, base - 3, o.kind === 'tree' ? 11 : 6, 3.5, 0, 0, 7); c.fill();
+  }
+  c.drawImage(spr, ox + (W - spr.width) / 2, base - spr.height);
+}
+
+function drawMember(c, p, i, pp, camX, camY, walkFrame) {
+  const m = G.party[i];
+  const moving = field.moving && (p.x !== p.fx || p.y !== p.fy);
+  const img = spriteFor(m.id, p.dir, moving ? walkFrame : 0);
+  if (!img) return;
+  const h = 42, w = img.width * h / img.height;
+  const cx = pp.x + TILE / 2 - camX, by = pp.y + TILE - 2 - camY;
+  const bob = moving && walkFrame ? (p.dir === 'up' || p.dir === 'down' ? -2 : -1) : 0;
+  c.fillStyle = 'rgba(0,0,0,0.28)';
+  c.beginPath(); c.ellipse(cx, by, 9, 3.5, 0, 0, 7); c.fill();
+  c.save();
+  if (!alive(m)) c.globalAlpha = 0.45;
+  c.imageSmoothingEnabled = true;
+  if (p.dir === 'right') { c.translate(cx, 0); c.scale(-1, 1); c.drawImage(img, -w / 2, by - h + bob, w, h); }
+  else c.drawImage(img, cx - w / 2, by - h + bob, w, h);
+  c.restore();
+  // 森の中では足元を木で隠す
+  const tx = Math.round(pp.x / TILE), ty = Math.round(pp.y / TILE);
+  if (G.map[ty] && G.map[ty][tx] === T.FOREST && !moving) {
+    const tile = makeTile(T.FOREST, (((tx * 73856093) ^ (ty * 19349663)) >>> 0) % 4, 0);
+    c.drawImage(tile, 0, 20, TILE, 12, tx * TILE - camX, ty * TILE + 20 - camY, TILE, 12);
   }
 }
 
@@ -428,7 +577,7 @@ function updateHud() {
   const lead = G.pos[0];
   const z = zoneAt(lead.x, lead.y);
   $('#zone-name').textContent = z.name;
-  $('#zone-danger').textContent = '★'.repeat(z.danger) + '☆'.repeat(3 - z.danger);
+  $('#zone-danger').textContent = z.danger ? '★'.repeat(z.danger) + '☆'.repeat(3 - z.danger) : 'まもののいない町';
   $('#gold').textContent = G.gold + ' G';
   const box = $('#hud-party');
   if (box.children.length !== G.party.length) {
@@ -469,23 +618,6 @@ function dialog(text, buttons) {
   });
 }
 
-async function enterCastle() {
-  if (G.mode !== 'field') return;
-  G.mode = 'busy'; field.input = null;
-  const r = await dialog('お城に もどってきた。\n宿屋で やすみますか？（無料・セーブもします）', ['やすむ', 'やめる']);
-  if (r === 0) {
-    await fade(true);
-    G.party.forEach(m => { m.hp = m.mhp; m.mp = m.mmp; });
-    const ok = saveGame();
-    updateHud();
-    await sleep(300);
-    await fade(false);
-    Sfx.play('heal');
-    await dialog('ぐっすり やすんだ。\nHPとMPが ぜんかいふくした！' + (ok ? '\n（セーブしました）' : '\n（このブラウザではセーブできません）'), ['OK']);
-  }
-  G.mode = 'field';
-}
-
 function fade(on, ms = 350) {
   const f = $('#fade');
   f.style.transitionDuration = ms + 'ms';
@@ -509,7 +641,7 @@ function renderMenu(note = '') {
   const st = $('#menu-status');
   st.innerHTML = G.party.map(m => {
     const next = expForLevel(m.lv + 1) - m.exp;
-    return `<div class="card ${alive(m) ? '' : 'dead'}">
+    return `<div class="card ${alive(m) ? '' : 'dead'}" data-i="${G.party.indexOf(m)}" role="button" tabindex="0">
       <img class="face" src="${IMG_DIR}${m.id}_face.png" alt="">
       <div class="card-body">
         <div class="card-head"><b>${m.name}</b><span>Lv ${m.lv}</span></div>
@@ -517,9 +649,11 @@ function renderMenu(note = '') {
         <div class="stat-row"><span>HP</span><i class="bar hp"><b style="width:${100 * m.hp / m.mhp}%"></b></i><span class="num">${m.hp}/${m.mhp}</span></div>
         <div class="stat-row"><span>MP</span><i class="bar mp"><b style="width:${100 * m.mp / m.mmp}%"></b></i><span class="num">${m.mp}/${m.mmp}</span></div>
         <div class="stat-grid"><span>攻撃 ${m.atk}</span><span>守備 ${m.def}</span><span>魔力 ${m.mag}</span><span>素早さ ${m.spd}</span></div>
+        <div class="card-equip">${['weapon', 'armor', 'acc'].map(sl => `<span>${SLOT_NAMES[sl]}：${m.equip[sl] ? EQUIPS[m.equip[sl]].name : 'なし'}</span>`).join('')}</div>
         <div class="card-next">つぎのレベルまで ${next} EXP</div>
       </div></div>`;
   }).join('');
+  st.querySelectorAll('.card').forEach(el => el.onclick = () => { Sfx.play('cursor'); equipMenu(G.party[+el.dataset.i]); });
   const it = $('#menu-items');
   it.innerHTML = Object.entries(ITEMS).map(([id, item]) =>
     `<button class="item-btn" data-item="${id}" ${G.items[id] ? '' : 'disabled'}><b>${item.name}</b><span>×${G.items[id] || 0}</span><small>${item.desc}</small></button>`).join('');
@@ -530,6 +664,7 @@ function renderMenu(note = '') {
 }
 async function useItemInField(id) {
   const item = ITEMS[id];
+  if (item.battleOnly) { renderMenu('それは バトルの ときに つかう ものだ。'); return; }
   const cands = G.party.filter(m => item.kind === 'revive' ? !alive(m) : alive(m));
   if (!cands.length) { renderMenu('つかえる あいてが いません'); return; }
   const names = cands.map(m => `${m.name}（HP ${m.hp}/${m.mhp}）`);
@@ -549,6 +684,163 @@ function applyItem(item, m) {
     m.hp = Math.floor(m.mhp / 2); return `${m.name}は いきかえった！`;
   }
   return '';
+}
+
+// ============================================================
+// お店・装備
+// ============================================================
+const shop = { id: null, tab: 'buy', sel: null, resolve: null };
+const goodsInfo = id => EQUIPS[id] || ITEMS[id];
+function statText(e) {
+  return Object.keys(STAT_NAMES).filter(k => e[k]).map(k => `${STAT_NAMES[k]}${e[k] > 0 ? '+' : ''}${e[k]}`).join(' ') || 'のうりょく変化なし';
+}
+function whoText(e) {
+  return e.who === 'all' ? 'みんな' : e.who.map(id => PARTY_BASE.find(b => b.id === id).name).join('・');
+}
+function ownedCount(id) {
+  if (ITEMS[id]) return G.items[id] || 0;
+  let n = G.bag[id] || 0;
+  G.party.forEach(m => { for (const s in m.equip) if (m.equip[s] === id) n++; });
+  return n;
+}
+function equipItem(m, id) {
+  const slot = EQUIPS[id].slot, old = m.equip[slot];
+  if (old) G.bag[old] = (G.bag[old] || 0) + 1;
+  m.equip[slot] = id;
+  recalc(m);
+}
+function unequip(m, slot) {
+  const old = m.equip[slot];
+  if (!old) return;
+  G.bag[old] = (G.bag[old] || 0) + 1;
+  m.equip[slot] = null;
+  recalc(m);
+}
+
+function openShop(id) {
+  return new Promise(res => {
+    Object.assign(shop, { id, tab: 'buy', sel: null, resolve: res });
+    const s = SHOPS[id];
+    $('#shop-name').textContent = s.name;
+    shopTalk(`${s.keeper}「${s.greet}」`);
+    renderShop();
+    $('#shop').hidden = false;
+  });
+}
+function closeShop() {
+  Sfx.play('cancel');
+  $('#shop').hidden = true;
+  G.mode = 'field';
+  updateHud();
+  const r = shop.resolve; shop.resolve = null;
+  if (r) r();
+}
+function shopTalk(t) { $('#shop-talk').textContent = t; }
+
+function shopEntries() {
+  if (shop.tab === 'buy') return SHOPS[shop.id].goods.map(id => ({ id, price: goodsInfo(id).price }));
+  const list = [];
+  for (const id in ITEMS) if (G.items[id] > 0) list.push({ id, price: Math.floor(ITEMS[id].price / 2), count: G.items[id] });
+  for (const id in G.bag) if (G.bag[id] > 0) list.push({ id, price: Math.floor(EQUIPS[id].price / 2), count: G.bag[id] });
+  return list;
+}
+
+function renderShop() {
+  $('#shop-gold').textContent = G.gold + ' G';
+  $('#tab-buy').classList.toggle('on', shop.tab === 'buy');
+  $('#tab-sell').classList.toggle('on', shop.tab === 'sell');
+  const entries = shopEntries();
+  if (shop.sel && !entries.some(e => e.id === shop.sel)) shop.sel = null;
+  const list = $('#shop-list');
+  if (!entries.length) list.innerHTML = '<p class="empty">うれる ものを もっていない。<br>（そうびちゅうの ものは うれません）</p>';
+  else list.innerHTML = entries.map(e => {
+    const g = goodsInfo(e.id);
+    const sub = EQUIPS[e.id] ? `${SLOT_NAMES[g.slot]}・${whoText(g)}・${statText(g)}` : g.desc;
+    const tooPoor = shop.tab === 'buy' && G.gold < e.price;
+    return `<button class="goods ${shop.sel === e.id ? 'on' : ''} ${tooPoor ? 'poor' : ''}" data-id="${e.id}">
+      <span class="goods-name">${g.name}</span><span class="goods-price">${e.price} G</span>
+      <small>${sub}　${shop.tab === 'buy' ? 'もっている数 ' + ownedCount(e.id) : '×' + e.count}</small></button>`;
+  }).join('');
+  list.querySelectorAll('.goods').forEach(b => b.onclick = () => { Sfx.play('cursor'); shop.sel = b.dataset.id; renderShop(); });
+  // 選んだ品の くわしい情報
+  const det = $('#shop-detail');
+  const act = $('#btn-shop-act');
+  act.textContent = shop.tab === 'buy' ? 'かう' : 'うる';
+  if (!shop.sel) {
+    det.innerHTML = '<span class="hint">しなものを タップしてください</span>';
+    act.disabled = true;
+    return;
+  }
+  const g = goodsInfo(shop.sel);
+  const e = entries.find(x => x.id === shop.sel);
+  act.disabled = shop.tab === 'buy' && G.gold < e.price;
+  if (EQUIPS[shop.sel]) {
+    det.innerHTML = `<ul class="compare">${G.party.map(m => compareLine(m, shop.sel)).join('')}</ul>`;
+  } else {
+    det.innerHTML = `<span>${g.name}：${g.desc}</span>`;
+  }
+}
+
+function compareLine(m, id) {
+  const e = EQUIPS[id];
+  if (!canEquip(m, id)) return `<li class="ng"><b>${m.name}</b>そうびできない</li>`;
+  const cur = EQUIPS[m.equip[e.slot]];
+  if (m.equip[e.slot] === id) return `<li><b>${m.name}</b>そうびしている</li>`;
+  const parts = Object.keys(STAT_NAMES).filter(k => e[k] || (cur && cur[k])).map(k => {
+    const nv = m[k] - ((cur && cur[k]) || 0) + (e[k] || 0);
+    const cls = nv > m[k] ? 'up' : nv < m[k] ? 'down' : '';
+    return `<span class="${cls}">${STAT_NAMES[k]} ${m[k]}→${nv}</span>`;
+  });
+  return `<li><b>${m.name}</b>${parts.join(' ') || '変化なし'}</li>`;
+}
+
+async function shopAction() {
+  const id = shop.sel;
+  if (!id) return;
+  const g = goodsInfo(id), s = SHOPS[shop.id];
+  if (shop.tab === 'buy') {
+    if (G.gold < g.price) { shopTalk(`${s.keeper}「おかねが たりないようだね。」`); Sfx.play('cancel'); return; }
+    G.gold -= g.price;
+    Sfx.play('ok');
+    if (EQUIPS[id]) {
+      const cands = G.party.filter(m => canEquip(m, id));
+      const i = await dialog(`${g.name}を かった！\nすぐに そうびしますか？`, [...cands.map(m => `${m.name}が そうびする`), 'もちものに しまう']);
+      if (i < cands.length) { equipItem(cands[i], id); shopTalk(`${s.keeper}「${s.thanks}」\n（${cands[i].name}は ${g.name}を そうびした）`); }
+      else { G.bag[id] = (G.bag[id] || 0) + 1; shopTalk(`${s.keeper}「${s.thanks}」`); }
+    } else {
+      G.items[id] = (G.items[id] || 0) + 1;
+      shopTalk(`${s.keeper}「${s.thanks}」（${g.name}×${G.items[id]}）`);
+    }
+  } else {
+    const price = Math.floor(g.price / 2);
+    const r = await dialog(`${g.name}を ${price}Gで うりますか？`, ['うる', 'やめる']);
+    if (r !== 0) return;
+    if (EQUIPS[id]) G.bag[id]--; else G.items[id]--;
+    G.gold += price;
+    Sfx.play('ok');
+    shopTalk(`${s.keeper}「たしかに。 ${price}G だよ。」`);
+  }
+  renderShop();
+}
+
+async function equipMenu(m) {
+  const slots = ['weapon', 'armor', 'acc'];
+  for (;;) {
+    const i = await dialog(`${m.name}の そうび\n攻撃 ${m.atk}　守備 ${m.def}　魔力 ${m.mag}　素早さ ${m.spd}`,
+      [...slots.map(s => `${SLOT_NAMES[s]}：${m.equip[s] ? EQUIPS[m.equip[s]].name : 'なし'}`), 'もどる']);
+    if (i >= slots.length) break;
+    const slot = slots[i];
+    const opts = Object.keys(G.bag).filter(id => G.bag[id] > 0 && EQUIPS[id].slot === slot && canEquip(m, id));
+    const labels = opts.map(id => `${EQUIPS[id].name}（${statText(EQUIPS[id])}）`);
+    const hasCur = !!m.equip[slot];
+    if (hasCur) labels.push('はずす');
+    labels.push('もどる');
+    const j = await dialog(opts.length || hasCur ? `${SLOT_NAMES[slot]}を えらんでください。` : `そうびできる ${SLOT_NAMES[slot]}を もっていない。`, labels);
+    if (j < opts.length) { G.bag[opts[j]]--; equipItem(m, opts[j]); }
+    else if (hasCur && j === opts.length) unequip(m, slot);
+    renderMenu();
+  }
+  renderMenu();
 }
 
 // ============================================================
@@ -651,7 +943,7 @@ async function startBattle(ids) {
 }
 
 async function battleLoop() {
-  while (!B.over) {
+  while (B && !B.over) {
     const input = await inputPhase();
     if (input.run) {
       setCmd([]);
@@ -750,7 +1042,7 @@ async function chooseCommand(m, canBack) {
 
 // 対象選択。全体対象はそのまま返す。キャンセルで null
 async function pickTarget(kind, m) {
-  if (kind === 'enemies' || kind === 'allies') return kind;
+  if (kind === 'enemies' || kind === 'allies' || kind === 'none') return kind;
   let cands;
   if (kind === 'enemy') cands = B.enemies.filter(e => !e.gone);
   else if (kind === 'ally') cands = G.party.filter(alive);
@@ -787,14 +1079,15 @@ async function execTurn(cmds) {
   acts.forEach(a => a.order = a.actor.spd * rand(0.75, 1.25));
   acts.sort((a, b) => b.order - a.order);
   for (const a of acts) {
-    if (B.over) break;
+    if (!B || B.over) break;
     if (a.type === 'enemy' ? a.actor.gone : !alive(a.actor)) continue;
     if (a.type === 'enemy') await enemyAct(a.actor);
     else await partyAct(a);
+    if (!B) return;
     renderBattleStatus();
     if (await checkEnd()) return;
   }
-  if (B.guard > 0) { B.guard--; if (B.guard === 0) await say('鉄壁の こうかが きれた。', 600); }
+  if (B && B.guard > 0) { B.guard--; if (B.guard === 0) await say('鉄壁の こうかが きれた。', 600); }
 }
 
 function livingEnemies() { return B.enemies.filter(e => !e.gone); }
@@ -845,6 +1138,14 @@ async function partyAct(a) {
     if (!G.items[a.item]) { await say(`しかし ${item.name}は もう なかった！`, 800); return; }
     let t = a.target;
     G.items[a.item]--;
+    if (item.kind === 'escape') {
+      await say(`${m.name}は けむりだまを なげた！`, 500);
+      Sfx.play('run');
+      B.over = true;
+      await say('もくもくと けむりが たちこめる…\nうまく にげきれた！', 900);
+      await endBattle('run');
+      return;
+    }
     await stepForward(m, 1);
     await say(`${m.name}は ${item.name}を つかった！`, 350);
     const fx = spawnFx(item.kind === 'revive' ? 'holy' : 'heal', t);
@@ -1047,9 +1348,9 @@ async function defeat() {
   await waitTap();
   G.gold = Math.floor(G.gold / 2);
   G.party.forEach(m => { m.hp = m.mhp; m.mp = m.mmp; });
-  resetPositions(START_POS.x, START_POS.y);
+  resetPositions(INN_FRONT.x, INN_FRONT.y);
   await endBattle('lose');
-  await dialog('……気がつくと お城の まえにいた。\n（所持金が はんぶんに なった）', ['OK']);
+  await dialog('……気がつくと ルミナの町の 宿屋の まえにいた。\n（所持金が はんぶんに なった）', ['OK']);
   G.mode = 'field';
 }
 
@@ -1701,6 +2002,10 @@ function setupInput() {
   $('#btn-close').addEventListener('click', () => { Sfx.play('cancel'); closeMenu(); });
   $('#btn-save').addEventListener('click', () => { renderMenu(saveGame() ? 'セーブしました。' : 'このブラウザでは セーブできません。'); Sfx.play('ok'); });
   $('#btn-sound').addEventListener('click', () => { Sfx.on = !Sfx.on; renderMenu(); });
+  $('#tab-buy').addEventListener('click', () => { Sfx.play('cursor'); shop.tab = 'buy'; shop.sel = null; renderShop(); });
+  $('#tab-sell').addEventListener('click', () => { Sfx.play('cursor'); shop.tab = 'sell'; shop.sel = null; renderShop(); });
+  $('#btn-shop-act').addEventListener('click', shopAction);
+  $('#btn-shop-exit').addEventListener('click', closeShop);
 
   const keys = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right' };
   const held = [];
@@ -1751,12 +2056,12 @@ async function boot() {
     updateHud();
     G.mode = 'field';
     await fade(false, 300);
-    toast(cont ? 'つづきから はじめます' : 'Dパッドで移動。お城で休めます', 2600);
+    toast(cont ? 'つづきから はじめます' : 'ルミナの町。お店の とびらに ぶつかると 入れます', 3000);
   };
   $('#btn-new').onclick = () => start(false);
   $('#btn-continue').onclick = () => start(true);
   requestAnimationFrame(loop);
-  if (location.hash === '#debug') window.__debug = { G, startBattle, field };
+  if (location.hash === '#debug') window.__debug = { G, startBattle, field, openShop };
 }
 
 boot();
