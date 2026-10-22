@@ -473,7 +473,7 @@ function rollEncounter(table) {
   const roll1 = () => { let r = Math.random() * total; for (const [id, w] of table) { if ((r -= w) < 0) return id; } return table[0][0]; };
   const first = roll1();
   if (first === 'darkdragon' || first === 'metalslime') return [first];
-  const n = ri(1, 3);
+  const n = ri(1, Math.min(3, G.party.length + 1)); // ひとりのときは 2体まで
   const list = [first];
   for (let i = 1; i < n; i++) { const id = roll1(); if (id !== 'darkdragon' && id !== 'metalslime') list.push(id); }
   return list;
