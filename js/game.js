@@ -15,7 +15,7 @@ const R = 2; // キャンバスの内部解像度倍率
 
 const images = {};
 function loadImages() {
-  const names = ['bg_sky'];
+  const names = ['bg_sky', 'lucifer_art', 'lucifer_face', 'eclipse_omen'];
   for (const p of PARTY_BASE) {
     names.push(p.id + '_face');
     for (let i = 0; i < 4; i++) names.push(`${p.id}_stand${i}`, `${p.id}_battle${i}`);
@@ -81,6 +81,7 @@ const Sfx = {
       case 'lose': [392, 370, 349, 330].forEach((f, i) => this.tone(f, 0.35, { type: 'triangle', vol: 0.06, delay: i * 0.3 })); break;
       case 'run': this.tone(400, 0.25, { slide: 800, vol: 0.04 }); break;
       case 'step': this.tone(90, 0.03, { type: 'triangle', vol: 0.03 }); break;
+      case 'blip': this.tone(660, 0.025, { vol: 0.02 }); break;
       case 'die': this.tone(500, 0.4, { type: 'sawtooth', slide: -420, vol: 0.05 }); break;
     }
   }
@@ -93,6 +94,7 @@ const G = {
   mode: 'title', // title | field | battle | busy
   party: [], items: {}, gold: 0, map: null,
   pos: [], steps: 0, safeSteps: 6,
+  flags: {}, reso: [], objective: '', eventRunning: false,
 };
 
 // m.b が素のステータス。m.atk などは装備込みの値（recalc で更新）
@@ -127,7 +129,8 @@ const canEquip = (m, id) => { const w = EQUIPS[id].who; return w === 'all' || w.
 const alive = m => m.hp > 0;
 
 function newGame() {
-  G.party = PARTY_BASE.map(b => makeMember(b));
+  G.party = [makeMember(PARTY_BASE[0])]; // 最初はレオンひとり
+  G.flags = {}; G.reso = []; G.objective = '';
   G.items = { ...START_ITEMS };
   G.bag = {};
   G.gold = START_GOLD;
@@ -144,7 +147,7 @@ const SAVE_KEY = 'eclipse-saga-save-v1';
 function saveGame() {
   const data = {
     party: G.party.map(m => ({ id: m.id, lv: m.lv, exp: m.exp, hp: m.hp, mp: m.mp, mhp: m.mhp, mmp: m.mmp, b: m.b, equip: m.equip })),
-    items: G.items, bag: G.bag, gold: G.gold, x: G.pos[0].x, y: G.pos[0].y,
+    items: G.items, bag: G.bag, gold: G.gold, flags: G.flags, reso: G.reso, objective: G.objective, x: G.pos[0].x, y: G.pos[0].y,
   };
   return storageSet(SAVE_KEY, JSON.stringify(data));
 }
@@ -162,6 +165,10 @@ function loadGame() {
       return m;
     });
     G.items = d.items; G.bag = d.bag || {}; G.gold = d.gold;
+    // ストーリー導入前のセーブは序章クリア扱い
+    G.flags = d.flags || { appraised: true, rumor: true, forestDone: true, prologueDone: true };
+    G.reso = d.reso || (G.party.some(m => m.id === 'selena') ? ['selena'] : []);
+    G.objective = d.objective || '';
     G.map = genMap();
     setupWorld();
     resetPositions(d.x, d.y);
@@ -387,6 +394,7 @@ function tryMove(dir) {
   if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) return false;
   const obj = G.solid[ny][nx];
   if (obj) { field.input = null; interact(obj, nx, ny); return false; }
+  if (npcAt(nx, ny)) { field.input = null; return false; }
   const t = G.map[ny][nx];
   if (!isWalkable(t)) return false;
   // 隊列：後ろのメンバーは前のメンバーがいた位置へ
@@ -403,10 +411,6 @@ function tryMove(dir) {
   return true;
 }
 
-const HOUSE_TALK = {
-  house1: ['おばあさん「おや、レオンじゃないか。 大きくなったねえ。」', 'おばあさん「森の まものは ひがしの草原より つよいよ。 気をつけてね。」'],
-  house2: ['男の子「ぼく、しょうらい ガロさんみたいな 戦士になるんだ！」', '男の子「メタルスライムって しってる？ すぐ にげちゃうけど すごい けいけんちなんだって！」'],
-};
 async function interact(o, x, y) {
   if (G.mode !== 'field') return;
   if (o.kind === 'building') {
@@ -416,9 +420,8 @@ async function interact(o, x, y) {
     if (SHOPS[o.id]) await openShop(o.id);
     else if (o.id === 'inn') await visitInn();
     else {
-      const talk = HOUSE_TALK[o.id];
-      await dialog(talk[o.talked = ((o.talked ?? -1) + 1) % talk.length], ['とじる']);
-      G.mode = 'field';
+      const ev = (DOOR_EVENTS[o.id] || []).find(d => condOk(d.when));
+      if (ev) await runEvent(ev.event); else G.mode = 'field';
     }
     return;
   }
@@ -454,6 +457,8 @@ function onArrive() {
   const lead = G.pos[0];
   const t = G.map[lead.y][lead.x];
   updateHud();
+  const trig = TRIGGERS.find(tr => lead.x >= tr.x0 && lead.x <= tr.x1 && lead.y >= tr.y0 && lead.y <= tr.y1 && condOk(tr.when));
+  if (trig) { runEvent(trig.event); return; }
   if (inTown(lead.x, lead.y)) return;
   if (G.safeSteps > 0) { G.safeSteps--; return; }
   const rate = ENCOUNTER_RATE[t] || 0;
@@ -526,6 +531,10 @@ function drawField() {
     list.push({ base, draw: () => drawObject(c, o, ox, base) });
   }
   const walkFrame = Math.floor(field.anim / 160) % 2;
+  for (const n of activeNpcs()) {
+    const base = (n.y + 1) * TILE - camY;
+    list.push({ base, draw: () => drawNpc(c, n, n.x * TILE - camX, base) });
+  }
   G.pos.forEach((p, i) => {
     const pp = posPx(p);
     list.push({ base: pp.y + TILE - camY - 0.01 * i, draw: () => drawMember(c, p, i, pp, camX, camY, walkFrame) });
@@ -547,6 +556,21 @@ function drawObject(c, o, ox, base) {
     c.beginPath(); c.ellipse(ox + 16, base - 3, o.kind === 'tree' ? 11 : 6, 3.5, 0, 0, 7); c.fill();
   }
   c.drawImage(spr, ox + (W - spr.width) / 2, base - spr.height);
+}
+
+function drawNpc(c, n, sx, base) {
+  const img = n.monster ? images['mon_' + n.monster] : spriteFor(n.sprite, n.dir, 0);
+  if (!img) return;
+  const h = n.monster ? 30 : 42, w = img.width * h / img.height;
+  const bob = n.monster ? Math.sin(field.anim / 200 + n.x) * 1.5 : 0;
+  c.fillStyle = 'rgba(0,0,0,0.28)';
+  c.beginPath(); c.ellipse(sx + 16, base - 2, 9, 3.5, 0, 0, 7); c.fill();
+  c.save();
+  c.imageSmoothingEnabled = true;
+  const flip = n.monster ? true : n.dir === 'right'; // 魔物は右（町の方）を向く
+  if (flip) { c.translate(sx + 16, 0); c.scale(-1, 1); c.drawImage(img, -w / 2, base - 2 - h + bob, w, h); }
+  else c.drawImage(img, sx + 16 - w / 2, base - 2 - h + bob, w, h);
+  c.restore();
 }
 
 function drawMember(c, p, i, pp, camX, camY, walkFrame) {
@@ -579,6 +603,8 @@ function updateHud() {
   $('#zone-name').textContent = z.name;
   $('#zone-danger').textContent = z.danger ? '★'.repeat(z.danger) + '☆'.repeat(3 - z.danger) : 'まもののいない町';
   $('#gold').textContent = G.gold + ' G';
+  $('#objective').textContent = G.objective ? '目的：' + G.objective : '';
+  $('#objective').hidden = !G.objective;
   const box = $('#hud-party');
   if (box.children.length !== G.party.length) {
     box.innerHTML = G.party.map(m => `<div class="mini" data-id="${m.id}"><img src="${IMG_DIR}${m.id}_face.png" alt=""><div class="mini-bars"><span class="mini-name"></span><i class="bar hp"><b></b></i><i class="bar mp"><b></b></i></div></div>`).join('');
@@ -684,6 +710,140 @@ function applyItem(item, m) {
     m.hp = Math.floor(m.mhp / 2); return `${m.name}は いきかえった！`;
   }
   return '';
+}
+
+// ============================================================
+// ストーリー（会話・ナレーション・イベント）
+// ============================================================
+const condOk = w => !w || ((!w.flag || G.flags[w.flag]) && (!w.not || !G.flags[w.not]));
+function activeNpcs() { return NPCS.filter(n => condOk(n.when)); }
+function npcAt(x, y) { return activeNpcs().find(n => n.x === x && n.y === y); }
+
+// 1文字ずつ表示して、タップで進める（表示中のタップは全文表示）
+function typeText(el, text, overlay) {
+  return new Promise(res => {
+    let i = 0, typing = true;
+    el.textContent = '';
+    const timer = setInterval(() => {
+      i++;
+      el.textContent = text.slice(0, i);
+      if (i % 3 === 0 && text[i - 1] !== ' ' && text[i - 1] !== '\n') Sfx.play('blip');
+      if (i >= text.length) { clearInterval(timer); typing = false; }
+    }, 32);
+    const h = ev => {
+      ev.preventDefault();
+      if (typing) { clearInterval(timer); el.textContent = text; typing = false; return; }
+      overlay.removeEventListener('pointerdown', h);
+      Sfx.play('cursor');
+      res();
+    };
+    setTimeout(() => overlay.addEventListener('pointerdown', h), 150);
+  });
+}
+async function talk(who, text) {
+  const sp = SPEAKERS[who] || { name: who };
+  const ov = $('#talk');
+  const face = $('#talk-face');
+  face.hidden = !sp.face;
+  if (sp.face) face.src = IMG_DIR + sp.face + '.png';
+  $('#talk-name').textContent = sp.name;
+  $('#talk-name').hidden = !sp.name;
+  ov.hidden = false;
+  await typeText($('#talk-text'), text, ov);
+  ov.hidden = true;
+}
+async function narrate(s) {
+  const ov = $('#narr');
+  const img = $('#narr-img');
+  img.hidden = !s.img;
+  if (s.img) img.src = IMG_DIR + s.img + '.png';
+  const sp = s.speaker ? SPEAKERS[s.speaker] : null;
+  $('#narr-name').textContent = sp ? sp.name : '';
+  $('#narr-name').hidden = !sp;
+  ov.hidden = false;
+  await typeText($('#narr-text'), s.text, ov);
+}
+function hideStoryOverlays() { $('#narr').hidden = true; $('#chapter').hidden = true; $('#talk').hidden = true; }
+async function chapterCard(s) {
+  const ov = $('#chapter');
+  $('#ch-no').textContent = s.no;
+  $('#ch-title').textContent = s.title;
+  $('#ch-sub').textContent = s.sub || '';
+  $('#narr').hidden = true;
+  ov.classList.remove('show');
+  ov.hidden = false;
+  void ov.offsetWidth;
+  ov.classList.add('show');
+  Sfx.play('lvup');
+  await sleep(2600);
+}
+function setObjective(text) {
+  G.objective = text;
+  updateHud();
+  if (text) toast('目的：' + text, 3200);
+}
+function joinParty(id) {
+  if (G.party.some(m => m.id === id)) return;
+  const lead = G.party[0];
+  const m = makeMember(PARTY_BASE.find(b => b.id === id), lead.lv);
+  m.exp = expForLevel(m.lv);
+  G.party.push(m);
+  const p = G.pos[G.pos.length - 1];
+  G.pos.push({ x: p.x, y: p.y, fx: p.x, fy: p.y, dir: p.dir });
+  $('#hud-party').innerHTML = '';
+  updateHud();
+  Sfx.play('lvup');
+}
+
+async function runEvent(name) {
+  const steps = EVENTS[name];
+  if (!steps || G.eventRunning) return;
+  G.eventRunning = true;
+  G.mode = 'busy'; field.input = null;
+  try {
+    for (const s of steps) {
+      if (['say', 'battle', 'join'].includes(s.t)) $('#narr').hidden = true;
+      if ((await doStep(s)) === 'abort') break;
+      if (G.mode !== 'battle') G.mode = 'busy';
+    }
+  } finally {
+    hideStoryOverlays();
+    if ($('#fade').classList.contains('on')) await fade(false);
+    G.eventRunning = false;
+    G.mode = 'field';
+    updateHud();
+  }
+}
+
+async function doStep(s) {
+  switch (s.t) {
+    case 'say': return talk(s.who, s.text);
+    case 'narr': return narrate(s);
+    case 'chapter': return chapterCard(s);
+    case 'fadeOut': return fade(true, 500);
+    case 'fadeIn':
+      if (!$('#fade').classList.contains('on')) await fade(true, 1);
+      $('#title').hidden = true;
+      hideStoryOverlays();
+      $('#field-view').hidden = false;
+      resizeField();
+      updateHud();
+      return fade(false, 600);
+    case 'flash': { const fl = $('#flash'); fl.classList.add('on'); await sleep(90); fl.classList.remove('on'); return sleep(150); }
+    case 'sfx': Sfx.play(s.name); return;
+    case 'wait': return sleep(s.ms);
+    case 'flag': G.flags[s.name] = true; return;
+    case 'objective': return setObjective(s.text);
+    case 'warp': resetPositions(s.x, s.y); G.pos.forEach(p => p.dir = s.dir || 'down'); return;
+    case 'join': return joinParty(s.id);
+    case 'resonance': if (!G.reso.includes(s.id)) G.reso.push(s.id); return;
+    case 'healAll': G.party.forEach(m => { m.hp = m.mhp; m.mp = m.mmp; }); return;
+    case 'save': saveGame(); return;
+    case 'battle': {
+      const r = await startBattle(s.enemies, { boss: s.boss });
+      return r === 'win' ? undefined : 'abort';
+    }
+  }
 }
 
 // ============================================================
@@ -915,7 +1075,12 @@ function nameEnemies(enemies) {
   });
 }
 
-async function startBattle(ids) {
+let battleResolve = null;
+function startBattle(ids, opts = {}) {
+  return new Promise(res => { battleResolve = res; beginBattle(ids, opts); });
+}
+function finishBattle(result) { const r = battleResolve; battleResolve = null; if (r) r(result); }
+async function beginBattle(ids, opts) {
   G.mode = 'battle'; field.input = null;
   Sfx.play('encounter');
   // エンカウント演出
@@ -926,10 +1091,11 @@ async function startBattle(ids) {
   B = {
     enemies: ids.map((id, i) => makeEnemy(id, i, ids.length)),
     fx: [], parts: [], nums: [], shake: 0, flash: 0, flashColor: '#ffffff', dim: 0, dimColor: '#000000', guard: 0,
-    active: null, targetSel: null, actors: {}, over: false, zone,
+    active: null, targetSel: null, actors: {}, over: false, zone, boss: !!opts.boss, cutin: null,
   };
   nameEnemies(B.enemies);
-  G.party.forEach((m, i) => B.actors[m.id] = { x: PARTY_SPOTS[i][0], y: PARTY_SPOTS[i][1], ox: 0, pose: 0, blink: 0, hurt: 0 });
+  const yShift = (4 - G.party.length) * 16; // 人数が少ないときは中央に寄せる
+  G.party.forEach((m, i) => B.actors[m.id] = { x: PARTY_SPOTS[i][0], y: PARTY_SPOTS[i][1] + yShift, ox: 0, pose: 0, blink: 0, hurt: 0 });
   battle.bg = makeBattleBg(zone);
   $('#field-view').hidden = true;
   $('#battle-view').hidden = false;
@@ -938,7 +1104,7 @@ async function startBattle(ids) {
   setCmd([]);
   await fade(false, 300);
   const names = [...new Set(B.enemies.map(e => e.data.name))];
-  await say(names.length === 1 && B.enemies.length > 1 ? `${names[0]}たちが あらわれた！` : `${names.join('と')}が あらわれた！`, 900);
+  await say((opts.boss ? '【ボス】' : '') + (names.length === 1 && B.enemies.length > 1 ? `${names[0]}たちが あらわれた！` : `${names.join('と')}が あらわれた！`), 900);
   battleLoop();
 }
 
@@ -981,25 +1147,33 @@ function waitChoice(buttons, opts) {
 
 async function inputPhase() {
   const members = G.party.filter(alive);
-  const cmds = [];
+  const cmds = []; // members と同じ並び。共鳴の相手は reserved になる
   let i = 0;
   while (i < members.length) {
     const m = members[i];
+    if (cmds.some(c => c.type === 'reso' && c.partner === m.id)) { cmds.push({ type: 'reserved', actor: m }); i++; continue; }
     B.active = m; renderBattleStatus();
     setMsg(`${m.name}は どうする？`);
     const c = await chooseCommand(m, i > 0);
-    if (c === 'back') { i--; cmds.pop(); continue; }
+    if (c === 'back') {
+      i--;
+      while (i > 0 && cmds[i] && cmds[i].type === 'reserved') { cmds.pop(); i--; }
+      cmds.pop();
+      continue;
+    }
     if (c.type === 'run') { B.active = null; renderBattleStatus(); return { run: true }; }
     cmds.push(c); i++;
   }
   B.active = null; renderBattleStatus(); setCmd([]);
-  return { cmds };
+  return { cmds: cmds.filter(c => c.type !== 'reserved') };
 }
 
 async function chooseCommand(m, canBack) {
   for (;;) {
+    const partners = m.id === 'leon' ? G.reso.filter(id => G.party.some(p => p.id === id && alive(p))) : [];
     const top = [
       { label: 'たたかう', value: 'attack' },
+      ...(partners.length ? [{ label: '共鳴', value: 'reso' }] : []),
       { label: 'スキル', value: 'skill' },
       { label: 'まほう', value: 'magic' },
       { label: 'アイテム', value: 'item' },
@@ -1008,7 +1182,23 @@ async function chooseCommand(m, canBack) {
     if (canBack) top.push({ label: 'もどる', value: 'back', back: true });
     const v = await waitChoice(top);
     if (v === 'back') return 'back';
-    if (v === 'run') return { type: 'run' };
+    if (v === 'run') {
+      if (B.boss) { setMsg('この たたかいからは にげられない！'); continue; }
+      return { type: 'run' };
+    }
+    if (v === 'reso') {
+      const btns = partners.map(id => {
+        const r = RESONANCE[id], p = G.party.find(x => x.id === id);
+        return { label: r.name, sub: `MP ${r.mp[0]}+${r.mp[1]}`, value: id, disabled: m.mp < r.mp[0] || p.mp < r.mp[1] };
+      });
+      btns.push({ label: 'もどる', value: 'back', back: true });
+      setMsg('共鳴技：レオンと なかまの MPを つかい、なかまの こうどうも つかう');
+      const id = await waitChoice(btns, { list: true, title: '共鳴' });
+      if (id === 'back') { setMsg(`${m.name}は どうする？`); continue; }
+      const t = await pickTarget(RESONANCE[id].target, m);
+      if (t === null) { setMsg(`${m.name}は どうする？`); continue; }
+      return { actor: m, type: 'reso', partner: id, target: t };
+    }
     if (v === 'attack') {
       const t = await pickTarget('enemy', m);
       if (t === null) continue;
@@ -1029,7 +1219,7 @@ async function chooseCommand(m, canBack) {
     if (v === 'item') {
       const ids = Object.keys(ITEMS).filter(id => G.items[id] > 0);
       if (!ids.length) { setMsg('アイテムを もっていない。'); continue; }
-      const btns = ids.map(id => ({ label: ITEMS[id].name, sub: `×${G.items[id]}`, value: id }));
+      const btns = ids.map(id => ({ label: ITEMS[id].name, sub: `×${G.items[id]}`, value: id, disabled: B.boss && ITEMS[id].kind === 'escape' }));
       btns.push({ label: 'もどる', value: 'back', back: true });
       const id = await waitChoice(btns, { list: true, title: 'アイテム' });
       if (id === 'back') { setMsg(`${m.name}は どうする？`); continue; }
@@ -1115,6 +1305,7 @@ function physDamage(atk, power, def, crit) {
 
 async function partyAct(a) {
   const m = a.actor;
+  if (a.type === 'reso') return resonanceAct(a);
   if (a.type === 'attack') {
     const t = retarget(a.target);
     if (!t) return;
@@ -1157,6 +1348,43 @@ async function partyAct(a) {
     await say(msg, 800);
     await stepBack(m);
   }
+}
+
+async function resonanceAct(a) {
+  const m = a.actor, r = RESONANCE[a.partner], p = G.party.find(x => x.id === a.partner);
+  if (!p || !alive(p)) { await say(`${p ? p.name : 'なかま'}が たおれていて 共鳴できない！`, 800); return; }
+  if (m.mp < r.mp[0] || p.mp < r.mp[1]) { await say('MPが たりなくて 共鳴できない！', 800); return; }
+  m.mp -= r.mp[0]; p.mp -= r.mp[1];
+  renderBattleStatus();
+  await Promise.all([stepForward(m, 2), stepForward(p, 1)]);
+  B.cutin = { text: r.name, t: 0, faces: [m.id, p.id] };
+  Sfx.play('lvup');
+  flash(0.6);
+  await say(`共鳴技！\n${m.name}と ${p.name}の「${r.name}」！`, 1300);
+  const stat = Math.round(m.atk * (r.kind === 'mag' ? 0.5 : 1) + p[r.stat]);
+  if (a.partner === 'selena') {
+    const t = retarget(a.target);
+    if (t) {
+      spawnFx('holy', t); await sleep(520);
+      const fx = spawnFx('slash2', t); await sleep(fx.dur * fx.hit);
+      await hitEnemy(t, stat, r.power, 'phys');
+    }
+    if (!B) return;
+    Sfx.play('heal');
+    for (const x of G.party.filter(alive)) {
+      const v = Math.min(x.mhp - x.hp, Math.round(p.mag * 2 + 30));
+      x.hp += v; popNum(x, v, '#7dff8a'); spawnFx('heal', x);
+    }
+    renderBattleStatus();
+    await say('やさしい 光が みんなを つつんだ！', 700);
+  } else {
+    if (a.partner === 'noa') { spawnFx('wind', null); await sleep(500); }
+    const fx = spawnFx(a.partner === 'garo' ? 'quake' : 'thunder', null);
+    await sleep(fx.dur * fx.hit);
+    for (const t of livingEnemies()) await hitEnemy(t, stat, r.power, r.kind, 240);
+  }
+  if (!B) return;
+  await Promise.all([stepBack(m), stepBack(p)]);
 }
 
 async function applySkill(m, s, target) {
@@ -1352,6 +1580,7 @@ async function defeat() {
   await endBattle('lose');
   await dialog('……気がつくと ルミナの町の 宿屋の まえにいた。\n（所持金が はんぶんに なった）', ['OK']);
   G.mode = 'field';
+  finishBattle('lose');
 }
 
 async function endBattle(result) {
@@ -1365,6 +1594,7 @@ async function endBattle(result) {
   updateHud();
   await fade(false, 350);
   G.mode = result === 'lose' ? 'busy' : 'field';
+  if (result !== 'lose') finishBattle(result);
 }
 
 // ---------- メッセージ ----------
@@ -1967,6 +2197,31 @@ function drawBattle(dt) {
   c.globalAlpha = 1;
   B.nums = B.nums.filter(n => n.t < 1100);
   if (B.flash > 0) { c.globalAlpha = Math.min(1, B.flash * 0.75); c.fillStyle = B.flashColor || '#ffffff'; c.fillRect(-20, -20, W + 40, H + 40); c.globalAlpha = 1; B.flash -= dt / 220; }
+  if (B.cutin) { // 共鳴技のカットイン
+    const ci = B.cutin;
+    ci.t += dt;
+    const k = Math.min(1, ci.t / 220), out = ci.t > 1000 ? Math.max(0, 1 - (ci.t - 1000) / 300) : 1;
+    const cy = H * 0.42;
+    c.save();
+    c.globalAlpha = out;
+    const g = c.createLinearGradient(0, cy - 30, 0, cy + 30);
+    g.addColorStop(0, 'rgba(10,20,60,0)'); g.addColorStop(0.2, 'rgba(10,20,60,0.88)'); g.addColorStop(0.8, 'rgba(10,20,60,0.88)'); g.addColorStop(1, 'rgba(10,20,60,0)');
+    c.fillStyle = g;
+    c.fillRect(W * (1 - k), cy - 30, W, 60);
+    ci.faces.forEach((id, i) => {
+      const img = images[id + '_face'];
+      if (!img) return;
+      const x = i ? W - 58 - (1 - k) * 80 : 10 + (1 - k) * -80;
+      c.drawImage(img, x, cy - 24, 48, 48);
+      c.strokeStyle = '#ffd75e'; c.lineWidth = 1.5; c.strokeRect(x, cy - 24, 48, 48);
+    });
+    c.font = 'bold 20px "DotGothic16", monospace'; c.textAlign = 'center';
+    c.lineWidth = 4; c.strokeStyle = '#1a0a30'; c.strokeText(ci.text, W / 2, cy + 7);
+    c.fillStyle = '#ffe680'; c.fillText(ci.text, W / 2, cy + 7);
+    c.font = '9px "DotGothic16", monospace'; c.fillStyle = '#bfe3ff'; c.fillText('― 共鳴技 ―', W / 2, cy - 16);
+    c.restore();
+    if (ci.t > 1300) B.cutin = null;
+  }
   if (B.guard > 0) {
     c.fillStyle = 'rgba(120,190,255,0.85)'; c.font = '10px "DotGothic16", monospace'; c.textAlign = 'left';
     c.fillText('鉄壁 残り' + B.guard, 6, 14);
@@ -2048,20 +2303,26 @@ async function boot() {
   $('#title-btns').hidden = false;
   const start = async cont => {
     Sfx.init(); Sfx.play('ok');
-    if (!(cont && loadGame())) newGame();
+    const loaded = cont && loadGame();
+    if (!loaded) newGame();
     await fade(true, 300);
+    if (!loaded) { // オープニング
+      $('#title').hidden = true;
+      await runEvent('opening');
+      return;
+    }
     $('#title').hidden = true;
     $('#field-view').hidden = false;
     resizeField();
     updateHud();
     G.mode = 'field';
     await fade(false, 300);
-    toast(cont ? 'つづきから はじめます' : 'ルミナの町。お店の とびらに ぶつかると 入れます', 3000);
+    toast('つづきから はじめます', 2400);
   };
   $('#btn-new').onclick = () => start(false);
   $('#btn-continue').onclick = () => start(true);
   requestAnimationFrame(loop);
-  if (location.hash === '#debug') window.__debug = { G, startBattle, field, openShop };
+  if (location.hash === '#debug') window.__debug = { G, startBattle, field, openShop, runEvent, joinParty };
 }
 
 boot();

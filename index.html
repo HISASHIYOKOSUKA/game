@@ -215,12 +215,35 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
 #title-btns .btn { font-size: 17px; padding: 12px; }
 .title-note { font-size: 11px; color: var(--ink-dim); max-width: 22em; }
 
+/* 会話・ナレーション・章タイトル */
+#objective { font-size: 11px; color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#talk { z-index: 35; align-items: flex-end; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+.talk-win { position: relative; width: 100%; display: flex; gap: 10px; padding: 12px; min-height: 110px; box-sizing: border-box;
+  background: #101018; border: 3px solid #f4f0e8; border-radius: 10px; box-shadow: 0 0 0 3px #101018, 0 6px 0 rgba(0,0,0,.35); }
+#talk-face { width: 72px; height: 72px; border-radius: 6px; border: 2px solid #f4f0e8; object-fit: cover; flex: none; }
+.talk-body { flex: 1; min-width: 0; }
+#talk-name { color: var(--gold); font-size: 13px; margin-bottom: 2px; }
+#talk-text { margin: 0; white-space: pre-line; font-size: 15px; line-height: 1.6; }
+.talk-next, .narr-next { position: absolute; right: 12px; bottom: 6px; color: var(--gold); animation: blink .8s steps(2) infinite; }
+#narr { z-index: 60; flex-direction: column; justify-content: center; align-items: center; gap: 14px; background: #000; text-align: center; }
+#narr-img { max-width: min(78%, 320px); max-height: 46vh; border-radius: 6px; border: 2px solid #3a3a5a; image-rendering: auto; box-shadow: 0 0 40px rgba(160,120,255,.35); }
+#narr-name { color: var(--gold); font-size: 13px; }
+#narr-text { margin: 0; white-space: pre-line; font-size: 16px; line-height: 1.9; max-width: 22em; min-height: 5.7em; }
+#chapter { z-index: 61; flex-direction: column; justify-content: center; align-items: center; gap: 8px; background: #000; text-align: center; }
+#ch-no { font-size: 14px; letter-spacing: .4em; color: var(--gold); opacity: 0; }
+#ch-title { font-size: clamp(22px, 7vw, 32px); letter-spacing: .1em; opacity: 0; text-shadow: 0 0 18px rgba(143,184,255,.7); }
+#ch-sub { font-size: 12px; color: var(--ink-dim); opacity: 0; }
+#chapter.show #ch-no { animation: chIn .8s ease forwards; }
+#chapter.show #ch-title { animation: chIn .8s ease .35s forwards; }
+#chapter.show #ch-sub { animation: chIn .8s ease .8s forwards; }
+@keyframes chIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
 #fade, #flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 50; }
 #fade { background: #000; transition: opacity .35s; }
 #fade.on { opacity: 1; }
-#flash { background: #fff; }
+#flash { background: #fff; z-index: 70; }
 #flash.on { opacity: .85; }
-@media (prefers-reduced-motion: reduce) { #msg.wait::after { animation: none; } .bar b { transition: none; } }
+@media (prefers-reduced-motion: reduce) { #msg.wait::after, .talk-next, .narr-next { animation: none; } .bar b { transition: none; } #chapter.show * { animation-duration: .01s !important; } }
 </style>
 </head>
 <body>
@@ -228,7 +251,8 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
   <section id="field-view" class="view" hidden>
     <div id="hud" class="win">
       <div id="hud-party"></div>
-      <div class="hud-line"><span><span id="zone-name">城の周辺</span><span id="zone-danger">★☆☆</span></span><span id="gold">0 G</span></div>
+      <div class="hud-line"><span><span id="zone-name">ルミナの町</span><span id="zone-danger"></span></span><span id="gold">0 G</span></div>
+      <div id="objective" hidden></div>
     </div>
     <div id="field-wrap"><canvas id="field" width="704" height="704"></canvas><div id="toast" hidden></div></div>
     <div id="controls">
@@ -304,7 +328,26 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
       <button id="btn-new" class="btn">はじめから</button>
       <button id="btn-continue" class="btn" hidden>つづきから</button>
     </div>
-    <p class="title-note">暫定版：フィールド探索とバトルまで。音が出ます。</p>
+    <p class="title-note">序章まで遊べます。音が出ます。</p>
+  </div>
+
+  <div id="talk" class="overlay" hidden>
+    <div class="talk-win">
+      <img id="talk-face" alt="">
+      <div class="talk-body"><div id="talk-name"></div><p id="talk-text"></p></div>
+      <span class="talk-next">▼</span>
+    </div>
+  </div>
+  <div id="narr" class="overlay" hidden>
+    <img id="narr-img" alt="">
+    <div id="narr-name"></div>
+    <p id="narr-text"></p>
+    <span class="narr-next">▼</span>
+  </div>
+  <div id="chapter" class="overlay" hidden>
+    <div id="ch-no"></div>
+    <div id="ch-title"></div>
+    <div id="ch-sub"></div>
   </div>
 
   <div id="flash"></div>
@@ -313,6 +356,7 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
 <script src="js/data.js"></script>
 <script src="js/map.js"></script>
 <script src="js/town.js"></script>
+<script src="js/story.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>
