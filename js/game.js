@@ -19,6 +19,7 @@ function loadImages() {
   for (const p of PARTY_BASE) {
     names.push(p.id + '_face');
     for (let i = 0; i < 4; i++) names.push(`${p.id}_stand${i}`, `${p.id}_battle${i}`);
+    for (let i = 0; i < 5; i++) names.push(`${p.id}_walk${i}`);
   }
   for (const id in MONSTERS) names.push('mon_' + id);
   return Promise.all(names.map(n => new Promise(res => {
@@ -295,9 +296,10 @@ function resizeField() {
   field.ctx.imageSmoothingEnabled = false;
 }
 
-function spriteFor(id, dir) {
-  const idx = { down: 0, left: 1, up: 2, right: 3 }[dir];
-  return images[`${id}_stand${idx}`];
+// 向きごとの2コマ歩行。右向きは左向きを左右反転して使う
+const WALK_FRAMES = { down: ['stand0', 'walk1'], up: ['stand2', 'walk4'], left: ['walk2', 'walk3'], right: ['walk2', 'walk3'] };
+function spriteFor(id, dir, step) {
+  return images[`${id}_${WALK_FRAMES[dir][step]}`];
 }
 
 function tryMove(dir) {
@@ -397,18 +399,17 @@ function drawField() {
   const walkFrame = Math.floor(field.anim / 160) % 2;
   for (const { p, i, pp } of order) {
     const m = G.party[i];
-    const img = spriteFor(m.id, p.dir);
-    if (!img) continue;
-    const scale = 0.5;
-    const w = img.width * scale, h = img.height * scale;
-    const cx = pp.x + TILE / 2 - camX, by = pp.y + TILE - 2 - camY;
     const moving = field.moving && (p.x !== p.fx || p.y !== p.fy);
-    const bob = moving && walkFrame ? -1.5 : 0;
+    const img = spriteFor(m.id, p.dir, moving ? walkFrame : 0);
+    if (!img) continue;
+    const h = 42, w = img.width * h / img.height;
+    const cx = pp.x + TILE / 2 - camX, by = pp.y + TILE - 2 - camY;
+    const bob = moving && walkFrame ? -1 : 0;
     c.fillStyle = 'rgba(0,0,0,0.28)';
     c.beginPath(); c.ellipse(cx, by, 9, 3.5, 0, 0, 7); c.fill();
     c.save();
     if (!alive(m)) c.globalAlpha = 0.45;
-    const flip = moving && walkFrame && (p.dir === 'up' || p.dir === 'down');
+    const flip = p.dir === 'right';
     c.imageSmoothingEnabled = true;
     if (flip) { c.translate(cx, 0); c.scale(-1, 1); c.drawImage(img, -w / 2, by - h + bob, w, h); }
     else c.drawImage(img, cx - w / 2, by - h + bob, w, h);
@@ -621,7 +622,7 @@ async function startBattle(ids) {
   const zone = zoneAt(G.pos[0].x, G.pos[0].y);
   B = {
     enemies: ids.map((id, i) => makeEnemy(id, i, ids.length)),
-    fx: [], parts: [], nums: [], shake: 0, flash: 0, guard: 0,
+    fx: [], parts: [], nums: [], shake: 0, flash: 0, flashColor: '#ffffff', dim: 0, dimColor: '#000000', guard: 0,
     active: null, targetSel: null, actors: {}, over: false, zone,
   };
   nameEnemies(B.enemies);
@@ -815,8 +816,8 @@ async function partyAct(a) {
     if (!t) return;
     await stepForward(m, 2);
     await say(`${m.name}の こうげき！`, 250);
-    spawnFx('slash', t);
-    await sleep(240);
+    const fx = spawnFx('slash', t);
+    await sleep(fx.dur * fx.hit);
     await hitEnemy(t, m.atk, 1.0, 'phys');
     await stepBack(m);
   } else if (a.type === 'skill') {
@@ -825,7 +826,7 @@ async function partyAct(a) {
     m.mp -= s.mp; renderBattleStatus();
     await stepForward(m, s.type === 'magic' ? 1 : 2);
     await say(`${m.name}は ${s.name}を ${s.type === 'magic' ? 'となえた' : 'はなった'}！`, 300);
-    if (s.type === 'magic') { Sfx.play('magic'); spawnCast(m); await sleep(350); }
+    if (s.type === 'magic') { Sfx.play('magic'); await sleep(spawnCast(m, s).dur * 0.85); }
     await applySkill(m, s, a.target);
     await stepBack(m);
   } else if (a.type === 'item') {
@@ -835,9 +836,9 @@ async function partyAct(a) {
     G.items[a.item]--;
     await stepForward(m, 1);
     await say(`${m.name}は ${item.name}を つかった！`, 350);
-    spawnFx(item.kind === 'revive' ? 'holy' : 'heal', t);
+    const fx = spawnFx(item.kind === 'revive' ? 'holy' : 'heal', t);
     Sfx.play('heal');
-    await sleep(400);
+    await sleep(fx.dur * fx.hit);
     const msg = applyItem(item, t);
     if (item.kind === 'heal' || item.kind === 'mp') popNum(t, msg.match(/\d+/) ? msg.match(/\d+/)[0] : '0', item.kind === 'mp' ? '#7fc8ff' : '#7dff8a');
     renderBattleStatus();
@@ -850,17 +851,17 @@ async function applySkill(m, s, target) {
   if (s.kind === 'phys' || s.kind === 'mag') {
     const targets = target === 'enemies' ? livingEnemies() : [retarget(target)].filter(Boolean);
     if (target === 'enemies') {
-      spawnFx(s.fx, null);
-      await sleep(420);
+      const fx = spawnFx(s.fx, null);
+      await sleep(fx.dur * fx.hit);
       for (const t of targets) await hitEnemy(t, s.kind === 'phys' ? m.atk : m.mag, s.power, s.kind, 260);
     } else {
-      for (const t of targets) { spawnFx(s.fx, t); await sleep(420); await hitEnemy(t, s.kind === 'phys' ? m.atk : m.mag, s.power, s.kind); }
+      for (const t of targets) { const fx = spawnFx(s.fx, t); await sleep(fx.dur * fx.hit); await hitEnemy(t, s.kind === 'phys' ? m.atk : m.mag, s.power, s.kind); }
     }
   } else if (s.kind === 'heal') {
     const targets = target === 'allies' ? G.party.filter(alive) : [target];
     Sfx.play('heal');
     targets.forEach(t => spawnFx('heal', t));
-    await sleep(500);
+    await sleep(FX.heal.dur * FX.heal.hit);
     const lines = [];
     for (const t of targets) {
       if (!alive(t)) { lines.push(`${t.name}には こうかが なかった。`); continue; }
@@ -874,16 +875,16 @@ async function applySkill(m, s, target) {
   } else if (s.kind === 'revive') {
     Sfx.play('heal');
     spawnFx('holy', target);
-    await sleep(500);
+    await sleep(FX.holy.dur * FX.holy.hit);
     if (alive(target)) { await say('しかし なにも おこらなかった。', 700); return; }
     target.hp = Math.floor(target.mhp / 2);
     renderBattleStatus();
     await say(`${target.name}は いきかえった！`, 800);
   } else if (s.kind === 'guard') {
-    spawnFx('guard', null);
+    spawnFx('guard', 'party');
     Sfx.play('magic');
     B.guard = 3;
-    await sleep(500);
+    await sleep(FX.guard.dur * 0.7);
     await say('みんなの 守りが かたくなった！（3ターン）', 800);
   }
 }
@@ -907,8 +908,11 @@ async function hitEnemy(t, stat, power, kind, wait = 500) {
     dmg = Math.max(1, Math.round(stat * power * rand(0.9, 1.1) - t.def * 0.15));
   }
   t.hp = Math.max(0, t.hp - dmg);
-  t.blink = 400;
-  B.shake = crit ? 6 : 2;
+  t.blink = 400; t.hitFlash = 110;
+  B.shake = Math.max(B.shake, crit ? 8 : 3);
+  const tp = targetPoint(t);
+  burst(tp.x, tp.y, crit ? 22 : 8, { color: crit ? ['#ffd23f', '#ffffff'] : ['#ffffff', '#ffe8b0'], add: true, shape: 'spark', min: 0.08, max: crit ? 0.35 : 0.2, life: 300 });
+  if (crit) flash(0.5, '#fff6d0');
   Sfx.play(crit ? 'crit' : 'hit');
   popNum(t, dmg, crit ? '#ffd23f' : '#ffffff');
   msg = (crit ? 'かいしんの いちげき！\n' : '') + (dmg === 0 ? `${t.name}には きいていない！` : `${t.name}に ${dmg}の ダメージ！`);
@@ -935,8 +939,8 @@ async function enemyAct(e) {
   if (sp) {
     await say(`${e.name}の ${sp.name}！`, 350);
     const hit = sp.all ? targets : [pick(targets)];
-    spawnFx(sp.fx || 'claw', sp.all ? 'party' : hit[0]);
-    await sleep(380);
+    const fx = spawnFx(sp.fx || 'claw', sp.all ? 'party' : hit[0], { src: e });
+    await sleep(fx.dur * fx.hit);
     let total = 0;
     const lines = [];
     for (const t of hit) {
@@ -951,8 +955,8 @@ async function enemyAct(e) {
   } else {
     await say(`${e.name}の こうげき！`, 300);
     const t = pick(targets);
-    spawnFx('claw', t);
-    await sleep(260);
+    const fx = spawnFx('claw', t);
+    await sleep(fx.dur * fx.hit);
     if (Math.random() < 0.05) { Sfx.play('cancel'); await say(`${t.name}は ひらりと みをかわした！`, 600); e.ox = 0; return; }
     const v = hurtMember(t, e.atk, false);
     renderBattleStatus();
@@ -1086,115 +1090,460 @@ function renderBattleStatus() {
 // ---------- エフェクト ----------
 function targetPoint(t) {
   if (t === 'party' || t === null) return null;
-  if (t.data) { const img = images['mon_' + t.id]; const h = img ? img.height * t.k : 60; return { x: t.x, y: t.y - h / 2 }; }
+  if (t.data) { const img = images['mon_' + t.id]; const h = img ? img.height * t.k : 60; return { x: t.x, y: t.y - h / 2, fy: t.y, h }; }
   const a = B.actors[t.id];
-  return { x: a.x + a.ox, y: a.y - 24 };
+  return { x: a.x + a.ox, y: a.y - 24, fy: a.y, h: 48 };
 }
 function popNum(t, v, color) {
   const p = targetPoint(t);
   if (p) B.nums.push({ x: p.x, y: p.y - 6, text: String(v), color, t: 0 });
 }
-function particle(o) { B.parts.push(Object.assign({ vx: 0, vy: 0, g: 0, life: 600, t: 0, size: 2, color: '#fff' }, o)); }
-
-function spawnCast(m) {
-  const a = B.actors[m.id];
-  for (let i = 0; i < 18; i++) {
-    const ang = Math.random() * Math.PI * 2;
-    particle({ x: a.x + a.ox + Math.cos(ang) * 22, y: a.y - 20 + Math.sin(ang) * 22, vx: -Math.cos(ang) * 0.05, vy: -Math.sin(ang) * 0.05, life: 400, color: pick(['#bfe3ff', '#ffffff', '#d7b8ff']), size: 2 });
+function particle(o) {
+  B.parts.push(Object.assign({ vx: 0, vy: 0, g: 0, drag: 1, life: 600, t: 0, size: 2, color: '#ffffff', add: false, shape: 'dot', rot: 0, vr: 0, grow: 0 }, o));
+}
+function burst(x, y, n, o) {
+  for (let i = 0; i < n; i++) {
+    const ang = rand(0, Math.PI * 2), sp = rand(o.min || 0.05, o.max || 0.2);
+    particle(Object.assign({}, o, { x, y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, rot: ang, color: Array.isArray(o.color) ? pick(o.color) : o.color, size: rand(o.size || 2, (o.size || 2) * 1.8), life: rand((o.life || 500) * 0.7, o.life || 500) }));
   }
 }
+function flash(a, color = '#ffffff') { B.flash = Math.max(B.flash, a); B.flashColor = color; }
 
-function spawnFx(kind, t) {
-  const pts = t === null ? livingEnemies().map(targetPoint) : t === 'party' ? G.party.filter(alive).map(targetPoint) : [targetPoint(t)];
-  const fx = { kind, t: 0, dur: 450, pts };
-  switch (kind) {
-    case 'slash': case 'claw': fx.dur = 260; break;
-    case 'slash2': fx.dur = 380; break;
-    case 'fire': case 'breath': case 'darkbreath': Sfx.play('fire'); fx.dur = 500;
-      for (const p of pts) for (let i = 0; i < 26; i++) particle({ x: p.x + rand(-14, 14), y: p.y + rand(-4, 16), vx: rand(-0.03, 0.03), vy: rand(-0.12, -0.04), life: rand(350, 650), color: kind === 'darkbreath' ? pick(['#8a3cff', '#c060ff', '#3a0a60']) : pick(['#ffdd55', '#ff8a2a', '#ff4a1a']), size: rand(2, 4) });
-      break;
-    case 'ice': Sfx.play('ice'); fx.dur = 550;
-      for (const p of pts) for (let i = 0; i < 14; i++) particle({ x: p.x + rand(-18, 18), y: p.y - 40 - rand(0, 20), vy: rand(0.1, 0.18), life: 450, color: pick(['#dff6ff', '#9fdcff', '#ffffff']), size: rand(2, 3), shard: true });
-      break;
-    case 'thunder': Sfx.play('thunder'); fx.dur = 420; B.flash = 1; break;
-    case 'holy': fx.dur = 600;
-      for (const p of pts) for (let i = 0; i < 16; i++) particle({ x: p.x + rand(-12, 12), y: p.y + rand(-10, 20), vy: rand(-0.1, -0.04), life: 600, color: pick(['#fff6c0', '#ffffff', '#ffe27a']), size: 2 });
-      break;
-    case 'heal': fx.dur = 600;
-      for (const p of pts) for (let i = 0; i < 14; i++) particle({ x: p.x + rand(-12, 12), y: p.y + rand(-4, 20), vy: rand(-0.09, -0.04), life: 650, color: pick(['#a8ffb8', '#ffffff', '#6effa0']), size: 2, sparkle: true });
-      break;
-    case 'wind': fx.dur = 600; Sfx.play('magic'); break;
-    case 'quake': fx.dur = 600; B.shake = 8; Sfx.play('thunder');
-      for (const p of pts) for (let i = 0; i < 10; i++) particle({ x: p.x + rand(-16, 16), y: p.y + 24, vx: rand(-0.05, 0.05), vy: rand(-0.25, -0.12), g: 0.0008, life: 600, color: pick(['#8a6a44', '#5e462a', '#b08a5a']), size: rand(2, 4) });
-      break;
-    case 'guard': fx.dur = 600; fx.pts = G.party.filter(alive).map(targetPoint); break;
-    case 'scream': case 'curse': fx.dur = 520; break;
-  }
-  B.fx.push(fx);
+// 色付きの光の玉（キャッシュして drawImage で描く）
+const glowCache = {};
+function glowSprite(col) {
+  if (glowCache[col]) return glowCache[col];
+  const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+  const g = cv.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, col); gr.addColorStop(0.35, col + '99'); gr.addColorStop(1, col + '00');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return (glowCache[col] = cv);
 }
-
-function drawFx(c, fx) {
-  const p = fx.t / fx.dur;
+function glow(c, x, y, r, col, alpha) {
+  if (alpha <= 0 || r <= 0) return;
+  c.globalAlpha = Math.min(1, alpha);
+  c.drawImage(glowSprite(col), x - r, y - r, r * 2, r * 2);
+}
+function magicCircle(c, x, y, r, col, rot, alpha) {
+  if (alpha <= 0) return;
   c.save();
-  for (const pt of fx.pts) {
-    if (!pt) continue;
-    switch (fx.kind) {
-      case 'slash': case 'slash2': {
-        const lines = fx.kind === 'slash2' ? [[-1, -1, 1, 1], [1, -1, -1, 1]] : [[-1, -1, 1, 1]];
-        c.strokeStyle = fx.kind === 'slash2' ? '#aef3ff' : '#ffffff'; c.lineWidth = 3; c.lineCap = 'round';
-        c.globalAlpha = 1 - p;
-        for (const [a, b, d, e] of lines) {
-          const k = Math.min(1, p * 2.2);
-          c.beginPath(); c.moveTo(pt.x + a * 20, pt.y + b * 20); c.lineTo(pt.x + a * 20 + (d - a) * 20 * k, pt.y + b * 20 + (e - b) * 20 * k); c.stroke();
-        }
-        break;
-      }
-      case 'claw': {
-        c.strokeStyle = '#ff6b6b'; c.lineWidth = 2; c.globalAlpha = 1 - p;
-        for (let i = -1; i <= 1; i++) { c.beginPath(); c.moveTo(pt.x - 10 + i * 6, pt.y - 14); c.lineTo(pt.x + 6 + i * 6, pt.y + 12 * Math.min(1, p * 2.5)); c.stroke(); }
-        break;
-      }
-      case 'thunder': {
-        c.strokeStyle = '#fff59a'; c.lineWidth = 3; c.globalAlpha = p < 0.7 ? 1 : (1 - p) / 0.3;
-        c.beginPath(); let x = pt.x, y = 0; c.moveTo(x, y);
-        const r = mulberry32(Math.floor(fx.t / 60) + 3);
-        while (y < pt.y + 10) { x = pt.x + (r() - 0.5) * 22; y += 14; c.lineTo(x, y); }
-        c.stroke(); c.strokeStyle = '#ffffff'; c.lineWidth = 1; c.stroke();
-        break;
-      }
-      case 'holy': case 'guard': {
-        c.globalAlpha = 1 - p; c.strokeStyle = fx.kind === 'guard' ? '#7fc8ff' : '#fff1a8'; c.lineWidth = 2;
-        c.beginPath(); c.arc(pt.x, pt.y, 6 + p * 26, 0, 7); c.stroke();
-        if (fx.kind === 'guard') { c.fillStyle = 'rgba(120,190,255,0.25)'; c.beginPath(); c.arc(pt.x, pt.y, 18, 0, 7); c.fill(); }
-        break;
-      }
-      case 'fire': case 'breath': case 'darkbreath': {
-        c.globalAlpha = (1 - p) * 0.6;
-        const g = c.createRadialGradient(pt.x, pt.y, 2, pt.x, pt.y, 30);
-        g.addColorStop(0, fx.kind === 'darkbreath' ? '#e0a0ff' : '#fff2a0'); g.addColorStop(1, 'rgba(255,80,20,0)');
-        c.fillStyle = g; c.beginPath(); c.arc(pt.x, pt.y, 30, 0, 7); c.fill();
-        break;
-      }
-      case 'wind': {
-        c.globalAlpha = 1 - p; c.strokeStyle = '#c8ffd8'; c.lineWidth = 2;
-        for (let i = 0; i < 3; i++) { c.beginPath(); c.arc(pt.x, pt.y, 10 + i * 7, p * 12 + i, p * 12 + i + 2.2); c.stroke(); }
-        break;
-      }
-      case 'scream': {
-        c.globalAlpha = 1 - p; c.strokeStyle = '#ffd0f0'; c.lineWidth = 2;
-        for (let i = 0; i < 3; i++) { c.beginPath(); c.arc(pt.x, pt.y, 6 + ((p * 30 + i * 10) % 30), 0, 7); c.stroke(); }
-        break;
-      }
-      case 'curse': {
-        c.globalAlpha = 1 - p; c.fillStyle = 'rgba(120,40,180,0.45)';
-        c.beginPath(); c.arc(pt.x, pt.y, 22 * (1 - p * 0.5), 0, 7); c.fill();
-        c.strokeStyle = '#d8a0ff'; c.lineWidth = 1.5;
-        c.beginPath(); for (let a = 0; a < 12; a += 0.3) c.lineTo(pt.x + Math.cos(a + p * 8) * a * 2, pt.y + Math.sin(a + p * 8) * a * 2); c.stroke();
-        break;
-      }
-    }
+  c.globalCompositeOperation = 'lighter';
+  c.globalAlpha = Math.min(1, alpha);
+  c.translate(x, y); c.scale(1, 0.38);
+  glow(c, 0, 0, r * 1.3, col, alpha * 0.5);
+  c.globalAlpha = Math.min(1, alpha);
+  c.rotate(rot);
+  c.strokeStyle = col; c.shadowColor = col; c.shadowBlur = 8; c.lineWidth = 1.6;
+  c.beginPath(); c.arc(0, 0, r, 0, 7); c.stroke();
+  c.beginPath(); c.arc(0, 0, r * 0.8, 0, 7); c.stroke();
+  for (let k = 0; k < 2; k++) {
+    c.beginPath();
+    for (let i = 0; i <= 3; i++) { const a = k * Math.PI / 3 + i * Math.PI * 2 / 3; c.lineTo(Math.cos(a) * r * 0.8, Math.sin(a) * r * 0.8); }
+    c.stroke();
+  }
+  for (let i = 0; i < 24; i++) {
+    const a = i / 24 * Math.PI * 2;
+    c.beginPath(); c.moveTo(Math.cos(a) * r * 0.84, Math.sin(a) * r * 0.84); c.lineTo(Math.cos(a) * r * (i % 2 ? 0.96 : 0.9), Math.sin(a) * r * (i % 2 ? 0.96 : 0.9)); c.stroke();
   }
   c.restore();
+}
+function bolt(c, x1, y1, x2, y2, seed, w, col, alpha) {
+  const r = mulberry32(seed);
+  const pts = [[x1, y1]];
+  const n = 12;
+  for (let i = 1; i < n; i++) {
+    const t = i / n;
+    pts.push([x1 + (x2 - x1) * t + (r() - 0.5) * 26, y1 + (y2 - y1) * t + (r() - 0.5) * 8]);
+  }
+  pts.push([x2, y2]);
+  const draw = (arr, lw) => {
+    c.lineWidth = lw * 2.2; c.strokeStyle = col; c.shadowColor = col; c.shadowBlur = 14;
+    c.beginPath(); arr.forEach(p => c.lineTo(p[0], p[1])); c.stroke();
+    c.lineWidth = lw * 0.7; c.strokeStyle = '#ffffff'; c.shadowBlur = 0;
+    c.beginPath(); arr.forEach(p => c.lineTo(p[0], p[1])); c.stroke();
+  };
+  c.save(); c.globalCompositeOperation = 'lighter'; c.globalAlpha = alpha; c.lineJoin = 'round';
+  draw(pts, w);
+  for (let b = 0; b < 3; b++) { // 枝分かれ
+    const s = pts[2 + Math.floor(r() * (n - 4))];
+    const br = [s]; let [bx, by] = s;
+    for (let i = 0; i < 4; i++) { bx += (r() - 0.5) * 22 + (r() < 0.5 ? -6 : 6); by += 6 + r() * 8; br.push([bx, by]); }
+    draw(br, w * 0.5);
+  }
+  c.restore();
+}
+// 三日月形の斬撃
+function crescent(c, x, y, r, a0, a1, width, col, alpha) {
+  if (alpha <= 0 || a1 <= a0) return;
+  const mid = (a0 + a1) / 2;
+  c.save(); c.globalCompositeOperation = 'lighter'; c.globalAlpha = Math.min(1, alpha);
+  c.shadowColor = col; c.shadowBlur = 12;
+  c.fillStyle = col;
+  c.beginPath(); c.arc(x, y, r, a0, a1); c.arc(x - Math.cos(mid) * width, y - Math.sin(mid) * width, r, a1, a0, true); c.fill();
+  c.fillStyle = '#ffffff'; c.shadowBlur = 0;
+  c.beginPath(); c.arc(x, y, r, a0, a1); c.arc(x - Math.cos(mid) * width * 0.4, y - Math.sin(mid) * width * 0.4, r, a1, a0, true); c.fill();
+  c.restore();
+}
+function shield(c, x, y, r, col, alpha, shine) {
+  c.save(); c.globalCompositeOperation = 'lighter'; c.globalAlpha = Math.min(1, alpha);
+  c.beginPath();
+  for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 - Math.PI / 2; c.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r * 1.1); }
+  c.closePath();
+  c.fillStyle = col + '44'; c.fill();
+  c.strokeStyle = col; c.lineWidth = 2; c.shadowColor = col; c.shadowBlur = 10; c.stroke();
+  c.clip();
+  c.fillStyle = '#ffffff88'; c.shadowBlur = 0;
+  c.fillRect(x - r + shine * r * 2.6 - r * 0.3, y - r * 1.2, r * 0.25, r * 2.4);
+  c.restore();
+}
+
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+const win = (p, a, b) => clamp((p - a) / (b - a), 0, 1); // p が a→b の間で 0→1
+
+// fx 定義：dur=全体の長さ, hit=ダメージを出すタイミング（割合）, dim=画面を暗くする量
+const FX = {
+  slash: { dur: 340, hit: 0.45,
+    draw(c, f, p, pt) {
+      const k = easeOut(win(p, 0, 0.45));
+      crescent(c, pt.x, pt.y, 24, -2.5, -2.5 + k * 2.6, 9, '#bfe8ff', 1 - win(p, 0.5, 1));
+    },
+    at: { 0.35(f, pt) { burst(pt.x, pt.y, 12, { color: ['#ffffff', '#fff1a0'], add: true, shape: 'spark', min: 0.08, max: 0.22, life: 300, size: 1.5 }); B.shake = 3; } } },
+  claw: { dur: 320, hit: 0.5,
+    draw(c, f, p, pt) {
+      const k = easeOut(win(p, 0, 0.5));
+      for (let i = -1; i <= 1; i++) crescent(c, pt.x + i * 8 - 30, pt.y - 10, 30, -0.6, -0.6 + k * 1.2, 5, '#ff5a5a', 1 - win(p, 0.55, 1));
+    },
+    at: { 0.4(f, pt) { burst(pt.x, pt.y, 10, { color: ['#ff8080', '#ffffff'], add: true, shape: 'spark', min: 0.06, max: 0.18, life: 300 }); } } },
+  slash2: { dur: 700, hit: 0.5, dim: 0.45, dimColor: '#06142e',
+    draw(c, f, p, pt) {
+      const k1 = easeOut(win(p, 0.05, 0.35)), k2 = easeOut(win(p, 0.3, 0.6));
+      crescent(c, pt.x, pt.y, 34, -2.6, -2.6 + k1 * 2.8, 12, '#5ff0ff', 1 - win(p, 0.45, 0.9));
+      crescent(c, pt.x, pt.y, 34, -0.6, -0.6 + k2 * 2.8, 12, '#5ff0ff', 1 - win(p, 0.65, 1));
+      c.save(); c.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 7; i++) { // 疾風の筋
+        const yy = pt.y - 26 + i * 9, len = 120, xx = pt.x + 90 - win(p, 0, 0.7) * 240 - i * 9;
+        c.globalAlpha = 0.7 * (1 - win(p, 0.5, 1)); c.fillStyle = i % 2 ? '#9ff8ff' : '#ffffff';
+        c.fillRect(xx, yy, len * (0.4 + (i % 3) * 0.2), 1.5);
+      }
+      c.restore();
+    },
+    at: {
+      0.25(f, pt) { burst(pt.x, pt.y, 14, { color: ['#9ff8ff', '#ffffff'], add: true, shape: 'spark', min: 0.1, max: 0.3, life: 350 }); B.shake = 4; Sfx.play('hit'); },
+      0.5(f, pt) { burst(pt.x, pt.y, 26, { color: ['#5ff0ff', '#ffffff', '#c8fff8'], add: true, shape: 'spark', min: 0.12, max: 0.35, life: 450, size: 2 }); flash(0.5, '#cffcff'); B.shake = 7; },
+    } },
+  wind: { dur: 1000, hit: 0.55, dim: 0.45, dimColor: '#06220f',
+    emit(f, dt, p, pts) {
+      if (p > 0.85) return;
+      for (const pt of pts) for (let i = 0; i < 2; i++) {
+        const a = rand(0, Math.PI * 2);
+        particle({ x: pt.x + Math.cos(a) * 16, y: pt.fy - rand(0, pt.h + 10), vx: -Math.sin(a) * 0.15, vy: rand(-0.12, -0.05), life: 500, color: pick(['#8cff9a', '#d8ffd0', '#4fd860']), add: true, shape: pick(['leaf', 'spark']), size: rand(1.5, 3), vr: rand(-0.02, 0.02), rot: a });
+      }
+    },
+    draw(c, f, p, pts) {
+      c.save(); c.globalCompositeOperation = 'lighter';
+      const grow = easeOut(win(p, 0, 0.3)), fade = 1 - win(p, 0.75, 1);
+      for (const pt of pts) {
+        for (let i = 0; i < 9; i++) { // 竜巻
+          const yy = pt.fy - i * (pt.h + 16) / 9, rx = (8 + i * 3.2) * grow;
+          const rot = f.t / 70 + i * 0.7;
+          c.globalAlpha = 0.75 * fade; c.strokeStyle = i % 2 ? '#c8ffd0' : '#6cf080'; c.lineWidth = 2; c.shadowColor = '#6cf080'; c.shadowBlur = 8;
+          c.beginPath(); c.ellipse(pt.x, yy, rx, rx * 0.3, 0, rot, rot + 3.6); c.stroke();
+        }
+        glow(c, pt.x, pt.y, 40 * grow, '#5cff7a', 0.35 * fade);
+      }
+      for (let i = 0; i < 6; i++) { // 画面を横切る突風
+        c.globalAlpha = 0.5 * (1 - win(p, 0, 0.5)); c.fillStyle = '#e0ffe0'; c.shadowBlur = 0;
+        c.fillRect(-60 + win(p, 0, 0.5) * 480 - i * 30, 90 + i * 28, 90, 1.5);
+      }
+      c.restore();
+    },
+    at: { 0.2() { Sfx.play('magic'); }, 0.55(f, pts) { pts.forEach(pt => burst(pt.x, pt.y, 16, { color: ['#c8ffd0', '#ffffff'], add: true, shape: 'spark', min: 0.1, max: 0.3, life: 400 })); B.shake = 5; } } },
+  quake: { dur: 1000, hit: 0.5, dim: 0.35, dimColor: '#1a0c02',
+    draw(c, f, p, pts) {
+      const k = easeOut(win(p, 0.05, 0.45)), fade = 1 - win(p, 0.75, 1);
+      c.save();
+      for (const [j, pt] of pts.entries()) { // 地割れ
+        const r = mulberry32(j * 13 + 5);
+        const sx = 120, sy = pt.fy + 4;
+        const path = [[sx, sy]];
+        for (let i = 1; i <= 10; i++) path.push([sx + (pt.x - sx) * i / 10 + (r() - 0.5) * 6, sy + (pt.fy - sy) * i / 10 + (r() - 0.5) * 8]);
+        const n = Math.max(1, Math.floor(path.length * k));
+        c.globalAlpha = fade; c.lineJoin = 'round';
+        c.strokeStyle = '#1a0d04'; c.lineWidth = 5; c.beginPath(); path.slice(0, n + 1).forEach(q => c.lineTo(q[0], q[1])); c.stroke();
+        c.globalCompositeOperation = 'lighter';
+        c.strokeStyle = '#ff9a2a'; c.shadowColor = '#ff6a00'; c.shadowBlur = 10; c.lineWidth = 2;
+        c.beginPath(); path.slice(0, n + 1).forEach(q => c.lineTo(q[0], q[1])); c.stroke();
+        c.globalCompositeOperation = 'source-over'; c.shadowBlur = 0;
+        if (p > 0.45) { // 噴き上がる岩の柱
+          const h = 46 * easeOut(win(p, 0.45, 0.6)) * fade;
+          c.globalCompositeOperation = 'lighter'; glow(c, pt.x, pt.fy - h / 2, 30, '#ff8a2a', 0.6 * fade); c.globalCompositeOperation = 'source-over';
+          c.globalAlpha = fade; c.fillStyle = '#6e5232';
+          c.beginPath(); c.moveTo(pt.x - 14, pt.fy); c.lineTo(pt.x - 4, pt.fy - h); c.lineTo(pt.x + 2, pt.fy - h * 0.7); c.lineTo(pt.x + 8, pt.fy - h * 0.9); c.lineTo(pt.x + 15, pt.fy); c.fill();
+          c.fillStyle = '#9a7a4e'; c.beginPath(); c.moveTo(pt.x - 14, pt.fy); c.lineTo(pt.x - 4, pt.fy - h); c.lineTo(pt.x - 2, pt.fy); c.fill();
+        }
+      }
+      c.restore();
+    },
+    at: {
+      0.1() { B.shake = 4; },
+      0.45(f, pts) {
+        B.shake = 12; flash(0.35, '#ffb060'); Sfx.play('thunder');
+        pts.forEach(pt => {
+          for (let i = 0; i < 14; i++) particle({ x: pt.x + rand(-14, 14), y: pt.fy, vx: rand(-0.08, 0.08), vy: rand(-0.4, -0.18), g: 0.0011, life: 800, color: pick(['#8a6a44', '#5e462a', '#b08a5a']), shape: 'rock', size: rand(2, 5), vr: rand(-0.02, 0.02) });
+          for (let i = 0; i < 6; i++) particle({ x: pt.x + rand(-20, 20), y: pt.fy - rand(0, 10), vx: rand(-0.03, 0.03), vy: rand(-0.03, -0.01), life: 900, color: '#a08060', shape: 'smoke', size: rand(6, 10) });
+        });
+      },
+    } },
+  fire: { dur: 950, hit: 0.45, dim: 0.5, dimColor: '#1e0402',
+    emit(f, dt, p, pts) {
+      if (p < 0.25 || p > 0.8) return;
+      for (const pt of pts) for (let i = 0; i < 4; i++) {
+        particle({ x: pt.x + rand(-12, 12), y: pt.fy - rand(0, 6), vx: rand(-0.02, 0.02), vy: rand(-0.28, -0.14), life: rand(300, 550), color: pick(['#ffe066', '#ff9a2a', '#ff4a1a', '#ffd0a0']), add: true, size: rand(3, 6), grow: -0.6 });
+      }
+    },
+    draw(c, f, p, pts) {
+      c.save();
+      for (const pt of pts) {
+        magicCircle(c, pt.x, pt.fy, 30 * easeOut(win(p, 0, 0.25)), '#ff6a2a', f.t / 300, 1 - win(p, 0.6, 0.9));
+        c.globalCompositeOperation = 'lighter';
+        const pulse = 1 + Math.sin(f.t / 40) * 0.08;
+        glow(c, pt.x, pt.y, 50 * win(p, 0.25, 0.45) * pulse, '#ff7a2a', 0.9 * (1 - win(p, 0.6, 1)));
+        glow(c, pt.x, pt.y, 26 * win(p, 0.3, 0.45) * pulse, '#fff0a0', 0.9 * (1 - win(p, 0.55, 0.9)));
+        c.globalCompositeOperation = 'source-over';
+      }
+      c.restore();
+    },
+    at: { 0.0() { Sfx.play('fire'); }, 0.42(f, pts) {
+      pts.forEach(pt => {
+        burst(pt.x, pt.y, 30, { color: ['#ffe066', '#ff9a2a', '#ff4a1a'], add: true, min: 0.08, max: 0.3, life: 550, size: 3, grow: -0.5 });
+        burst(pt.x, pt.y, 12, { color: ['#ffffff', '#fff0a0'], add: true, shape: 'spark', min: 0.15, max: 0.35, life: 350 });
+      });
+      flash(0.6, '#ffb060'); B.shake = 7;
+    } } },
+  ice: { dur: 1100, hit: 0.62, dim: 0.55, dimColor: '#020c26',
+    emit(f, dt, p) {
+      if (p > 0.8) return;
+      for (let i = 0; i < 3; i++) particle({ x: rand(60, 380), y: rand(-10, 120), vx: -0.12, vy: 0.14, life: 1000, color: pick(['#ffffff', '#cfefff']), add: true, size: rand(1, 2) });
+    },
+    draw(c, f, p, pts) {
+      const k = easeOut(win(p, 0.12, 0.55)), fade = 1 - win(p, 0.6, 0.66);
+      for (const pt of pts) {
+        magicCircle(c, pt.x, pt.fy, 28, '#7fd8ff', -f.t / 400, 0.8 * (1 - win(p, 0.6, 0.8)));
+        c.save(); c.globalCompositeOperation = 'lighter';
+        glow(c, pt.x, pt.y, 44 * k, '#7fd8ff', 0.6 * fade);
+        c.translate(pt.x, pt.y); c.globalAlpha = fade;
+        for (let i = 0; i < 7; i++) { // 氷の結晶
+          const a = i / 7 * Math.PI * 2 - Math.PI / 2 + 0.2, len = (16 + (i % 3) * 7) * k;
+          c.save(); c.rotate(a);
+          c.fillStyle = '#bfefff99'; c.strokeStyle = '#ffffff'; c.lineWidth = 1; c.shadowColor = '#9fe4ff'; c.shadowBlur = 8;
+          c.beginPath(); c.moveTo(0, 0); c.lineTo(len * 0.5, -len * 0.18); c.lineTo(len, 0); c.lineTo(len * 0.5, len * 0.18); c.closePath(); c.fill(); c.stroke();
+          c.restore();
+        }
+        c.restore();
+      }
+    },
+    at: { 0.0() { Sfx.play('ice'); }, 0.62(f, pts) {
+      pts.forEach(pt => burst(pt.x, pt.y, 24, { color: ['#ffffff', '#bfefff', '#7fd8ff'], add: true, shape: 'shard', min: 0.08, max: 0.28, life: 600, size: 2.5, vr: 0.02, g: 0.0004 }));
+      flash(0.5, '#cfefff'); B.shake = 5; Sfx.play('crit');
+    } } },
+  thunder: { dur: 800, hit: 0.3, dim: 0.65, dimColor: '#02030e',
+    draw(c, f, p, pts) {
+      const strikes = [[0.1, 0.24], [0.3, 0.44], [0.52, 0.66]];
+      for (const pt of pts) {
+        strikes.forEach(([a, b], i) => {
+          if (p < a || p > b) return;
+          const al = 1 - win(p, a, b) * 0.6;
+          bolt(c, pt.x + (i - 1) * 18, -10, pt.x, pt.y + 8, Math.floor(f.t / 45) + i * 7, 2.2, '#fff27a', al);
+          c.save(); c.globalCompositeOperation = 'lighter'; glow(c, pt.x, pt.y + 8, 40, '#fff6b0', al); c.restore();
+        });
+      }
+    },
+    at: {
+      0.1(f, pts) { flash(0.9); Sfx.play('thunder'); B.shake = 6; pts.forEach(pt => burst(pt.x, pt.y, 14, { color: ['#fff27a', '#ffffff'], add: true, shape: 'spark', min: 0.12, max: 0.35, life: 350 })); },
+      0.3(f, pts) { flash(0.8); B.shake = 7; pts.forEach(pt => burst(pt.x, pt.y, 14, { color: ['#fff27a', '#ffffff'], add: true, shape: 'spark', min: 0.12, max: 0.35, life: 350 })); },
+      0.52(f, pts) { flash(0.9); Sfx.play('thunder'); B.shake = 8; pts.forEach(pt => burst(pt.x, pt.y, 20, { color: ['#fff27a', '#ffffff', '#a0d8ff'], add: true, shape: 'spark', min: 0.12, max: 0.4, life: 420 })); },
+    } },
+  holy: { dur: 1100, hit: 0.5, dim: 0.5, dimColor: '#0a0818',
+    emit(f, dt, p, pts) {
+      if (p > 0.8) return;
+      for (const pt of pts) particle({ x: pt.x + rand(-14, 14), y: pt.fy - rand(0, pt.h), vy: rand(-0.12, -0.05), life: 600, color: pick(['#fff6c0', '#ffffff', '#ffe27a']), add: true, shape: 'cross', size: rand(1.5, 3) });
+    },
+    draw(c, f, p, pts) {
+      for (const pt of pts) {
+        magicCircle(c, pt.x, pt.fy, 30, '#ffe27a', f.t / 350, 1 - win(p, 0.7, 1));
+        const w = 30 * Math.sin(Math.PI * win(p, 0.15, 0.85));
+        c.save(); c.globalCompositeOperation = 'lighter';
+        const g = c.createLinearGradient(pt.x - w, 0, pt.x + w, 0);
+        g.addColorStop(0, '#ffe27a00'); g.addColorStop(0.5, '#fffbe8'); g.addColorStop(1, '#ffe27a00');
+        c.globalAlpha = 0.9; c.fillStyle = g; c.fillRect(pt.x - w, -10, w * 2, pt.fy + 10);
+        glow(c, pt.x, pt.y, 46 * win(p, 0.2, 0.5), '#fff2b0', 0.8 * (1 - win(p, 0.6, 1)));
+        for (let i = 0; i < 3; i++) {
+          const q = win(p, 0.3 + i * 0.12, 0.8 + i * 0.07);
+          if (q <= 0 || q >= 1) continue;
+          c.globalAlpha = 1 - q; c.strokeStyle = '#fff1a8'; c.lineWidth = 2; c.shadowColor = '#ffe27a'; c.shadowBlur = 10;
+          c.beginPath(); c.ellipse(pt.x, pt.y, 8 + q * 40, (8 + q * 40) * 0.6, 0, 0, 7); c.stroke();
+        }
+        c.restore();
+      }
+    },
+    at: { 0.15() { Sfx.play('heal'); }, 0.5(f, pts) { flash(0.55, '#fffbe0'); B.shake = 3; pts.forEach(pt => burst(pt.x, pt.y, 18, { color: ['#ffffff', '#fff1a8'], add: true, shape: 'spark', min: 0.1, max: 0.3, life: 450 })); } } },
+  heal: { dur: 950, hit: 0.55, dim: 0.2, dimColor: '#021a0a',
+    emit(f, dt, p, pts) {
+      if (p > 0.75) return;
+      for (const pt of pts) for (let i = 0; i < 2; i++) {
+        const a = f.t / 80 + i * Math.PI;
+        particle({ x: pt.x + Math.cos(a) * 16, y: pt.fy - (f.t / 950) * pt.h * 1.2, vy: -0.05, life: 500, color: pick(['#a8ffb8', '#ffffff', '#6effa0']), add: true, size: rand(2, 3) });
+        if (Math.random() < 0.4) particle({ x: pt.x + rand(-14, 14), y: pt.fy - rand(0, pt.h), vy: -0.06, life: 600, color: '#d8ffe0', add: true, shape: 'cross', size: rand(1.5, 3) });
+      }
+    },
+    draw(c, f, p, pts) {
+      for (const pt of pts) {
+        magicCircle(c, pt.x, pt.fy, 24, '#6effa0', f.t / 300, 1 - win(p, 0.7, 1));
+        c.save(); c.globalCompositeOperation = 'lighter';
+        glow(c, pt.x, pt.y, 38 * (1 + Math.sin(f.t / 90) * 0.1), '#6effa0', 0.55 * Math.sin(Math.PI * p));
+        c.restore();
+      }
+    } },
+  guard: { dur: 900, hit: 0.5, dim: 0.25, dimColor: '#020a1e',
+    draw(c, f, p, pts) {
+      const s = p < 0.3 ? easeOut(p / 0.3) * 1.15 : 1.15 - Math.min(0.15, (p - 0.3)); // 飛び出してから落ち着く
+      for (const pt of pts) shield(c, pt.x, pt.y, 24 * s, '#7fc8ff', 1 - win(p, 0.75, 1), win(p, 0.3, 0.8));
+    },
+    at: { 0.3(f, pts) { flash(0.3, '#bfe0ff'); pts.forEach(pt => burst(pt.x, pt.y, 10, { color: ['#bfe0ff', '#ffffff'], add: true, shape: 'spark', min: 0.08, max: 0.2, life: 400 })); } } },
+  cast: { dur: 650, hit: 1,
+    emit(f, dt, p, pts) {
+      for (const pt of pts) particle({ x: pt.x + rand(-14, 14), y: pt.fy, vy: rand(-0.15, -0.06), life: 450, color: f.color, add: true, size: rand(1.5, 2.5) });
+    },
+    draw(c, f, p, pts) {
+      for (const pt of pts) {
+        magicCircle(c, pt.x, pt.fy, 26 * easeOut(win(p, 0, 0.4)), f.color, f.t / 200, 1 - win(p, 0.75, 1));
+        c.save(); c.globalCompositeOperation = 'lighter'; glow(c, pt.x, pt.y - 6, 30, f.color, 0.5 * Math.sin(Math.PI * p)); c.restore();
+      }
+    } },
+  breath: { dur: 1000, hit: 0.6, dim: 0.35, dimColor: '#1e0402', color: ['#ffe066', '#ff9a2a', '#ff4a1a'],
+    emit(f, dt, p) {
+      if (p > 0.7 || !f.src) return;
+      for (let i = 0; i < 6; i++) {
+        const a = Math.PI + rand(-0.35, 0.35), sp = rand(0.22, 0.32);
+        particle({ x: f.src.x, y: f.src.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp + 0.03, life: rand(650, 850), color: pick(f.def.color), add: true, size: rand(3, 6), grow: 0.8 });
+      }
+    },
+    draw(c, f, p, pts) {
+      c.save(); c.globalCompositeOperation = 'lighter';
+      for (const pt of pts) glow(c, pt.x, pt.y, 30, f.def.color[1], 0.6 * win(p, 0.4, 0.6) * (1 - win(p, 0.7, 1)));
+      if (f.src) glow(c, f.src.x, f.src.y, 24, f.def.color[0], 0.8 * (1 - win(p, 0.6, 0.8)));
+      c.restore();
+    },
+    at: { 0.0() { Sfx.play('fire'); }, 0.55() { flash(0.4, '#ffb060'); B.shake = 6; } } },
+  scream: { dur: 750, hit: 0.5,
+    draw(c, f, p) {
+      if (!f.src) return;
+      c.save(); c.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 5; i++) {
+        const q = (p * 1.6 + i * 0.2) % 1;
+        c.globalAlpha = (1 - q) * (1 - win(p, 0.8, 1)); c.strokeStyle = '#ffb0e8'; c.lineWidth = 2.5; c.shadowColor = '#ff70d0'; c.shadowBlur = 8;
+        c.beginPath(); c.arc(f.src.x, f.src.y, 10 + q * 200, Math.PI * 0.7, Math.PI * 1.3); c.stroke();
+      }
+      c.restore();
+    },
+    at: { 0.2() { B.shake = 5; Sfx.play('hurt'); } } },
+  curse: { dur: 850, hit: 0.6, dim: 0.4, dimColor: '#12021e',
+    emit(f, dt, p, pts) {
+      if (p > 0.6) return;
+      for (const pt of pts) { const a = rand(0, Math.PI * 2); particle({ x: pt.x + Math.cos(a) * 34, y: pt.y + Math.sin(a) * 34, vx: -Math.cos(a) * 0.08, vy: -Math.sin(a) * 0.08, life: 420, color: pick(['#c070ff', '#7a20d0', '#ff60c0']), add: true, size: rand(2, 3) }); }
+    },
+    draw(c, f, p, pts) {
+      c.save();
+      for (const pt of pts) {
+        c.globalAlpha = 0.6 * Math.sin(Math.PI * p); c.fillStyle = '#1a0026';
+        c.beginPath(); c.arc(pt.x, pt.y, 26 * easeOut(win(p, 0, 0.5)), 0, 7); c.fill();
+        c.globalCompositeOperation = 'lighter';
+        glow(c, pt.x, pt.y, 34, '#a040ff', 0.7 * Math.sin(Math.PI * p));
+        c.strokeStyle = '#e0a0ff'; c.lineWidth = 1.5; c.globalAlpha = 1 - win(p, 0.6, 1);
+        c.beginPath(); for (let a = 0; a < 14; a += 0.25) c.lineTo(pt.x + Math.cos(a + f.t / 90) * (30 - a * 2), pt.y + Math.sin(a + f.t / 90) * (30 - a * 2)); c.stroke();
+        c.globalCompositeOperation = 'source-over';
+      }
+      c.restore();
+    },
+    at: { 0.6(f, pts) { flash(0.3, '#c080ff'); B.shake = 5; pts.forEach(pt => burst(pt.x, pt.y, 14, { color: ['#c070ff', '#ff60c0'], add: true, shape: 'spark', min: 0.08, max: 0.25, life: 400 })); } } },
+};
+FX.darkbreath = Object.assign({}, FX.breath, { dimColor: '#100018', color: ['#e0a0ff', '#a040ff', '#5a10a0'] });
+const CAST_COLOR = { fire: '#ff7a3a', ice: '#7fd8ff', thunder: '#fff27a', holy: '#ffe27a', heal: '#6effa0' };
+
+// kind のエフェクトを出す。t: 対象（null=敵全体, 'party'=味方全体）、src: 攻撃元
+function spawnFx(kind, t, opts = {}) {
+  const def = FX[kind] || FX.slash;
+  let pts;
+  if (opts.self) pts = [targetPoint(opts.self)];
+  else pts = t === null ? livingEnemies().map(targetPoint) : t === 'party' ? G.party.filter(alive).map(targetPoint) : [targetPoint(t)];
+  let src = null;
+  if (opts.src) { const sp = targetPoint(opts.src); src = { x: sp.x - sp.h * 0.25, y: sp.fy - sp.h * 0.6 }; }
+  const fx = { kind, def, t: 0, dur: def.dur, hit: def.hit, pts: pts.filter(Boolean), src, color: opts.color || '#bfe3ff', fired: {} };
+  B.fx.push(fx);
+  return fx;
+}
+function spawnCast(m, skill) {
+  return spawnFx('cast', null, { self: m, color: CAST_COLOR[skill.fx] || '#bfe3ff' });
+}
+function updateFx(fx, dt) {
+  fx.t += dt;
+  const p = Math.min(1, fx.t / fx.dur);
+  if (fx.def.emit) fx.def.emit(fx, dt, p, fx.pts);
+  if (fx.def.at) for (const k in fx.def.at) {
+    if (!fx.fired[k] && p >= parseFloat(k)) {
+      fx.fired[k] = true;
+      const single = ['slash', 'claw', 'slash2'].includes(fx.kind);
+      if (single) fx.pts.forEach(pt => fx.def.at[k](fx, pt)); else fx.def.at[k](fx, fx.pts);
+    }
+  }
+}
+function drawFx(c, fx) {
+  const p = Math.min(1, fx.t / fx.dur);
+  c.save();
+  if (['slash', 'claw', 'slash2'].includes(fx.kind)) fx.pts.forEach(pt => fx.def.draw(c, fx, p, pt));
+  else fx.def.draw(c, fx, p, fx.pts);
+  c.restore();
+}
+function drawParticles(c, dt) {
+  for (const pass of [false, true]) {
+    c.save();
+    if (pass) c.globalCompositeOperation = 'lighter';
+    for (const p of B.parts) {
+      if (p.add !== pass) continue;
+      const q = p.t / p.life, a = Math.max(0, 1 - q);
+      const s = Math.max(0.3, p.size * (1 + p.grow * q));
+      c.globalAlpha = a;
+      c.fillStyle = p.color; c.strokeStyle = p.color;
+      switch (p.shape) {
+        case 'dot':
+          if (pass) { glow(c, p.x, p.y, s * 2.6, p.color, a * 0.6); c.globalAlpha = a; }
+          c.fillRect(p.x - s / 2, p.y - s / 2, s, s); break;
+        case 'spark': {
+          const len = Math.hypot(p.vx, p.vy) * 40 + 2;
+          const ang = Math.atan2(p.vy, p.vx);
+          c.lineWidth = s * 0.7; c.beginPath(); c.moveTo(p.x, p.y); c.lineTo(p.x - Math.cos(ang) * len, p.y - Math.sin(ang) * len); c.stroke(); break;
+        }
+        case 'shard': case 'leaf': case 'rock':
+          c.save(); c.translate(p.x, p.y); c.rotate(p.rot);
+          if (p.shape === 'shard') { c.beginPath(); c.moveTo(-s * 1.6, 0); c.lineTo(0, -s * 0.5); c.lineTo(s * 1.6, 0); c.lineTo(0, s * 0.5); c.fill(); }
+          else if (p.shape === 'leaf') c.fillRect(-s, -s * 0.4, s * 2, s * 0.8);
+          else { c.fillRect(-s / 2, -s / 2, s, s); c.fillStyle = '#2a1a0a'; c.fillRect(-s / 2, s / 2 - 1, s, 1); }
+          c.restore(); break;
+        case 'cross':
+          c.fillRect(p.x - s, p.y - 0.5, s * 2, 1); c.fillRect(p.x - 0.5, p.y - s, 1, s * 2);
+          if (pass) glow(c, p.x, p.y, s * 2, p.color, a * 0.5);
+          break;
+        case 'smoke':
+          glow(c, p.x, p.y, s * (1 + q * 1.5), '#8a7050', a * 0.5); break;
+      }
+    }
+    c.restore();
+  }
+  for (const p of B.parts) {
+    p.t += dt; p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
+    if (p.drag !== 1) { p.vx *= p.drag; p.vy *= p.drag; }
+  }
+  B.parts = B.parts.filter(p => p.t < p.life);
 }
 
 function resizeBattle() {
@@ -1228,7 +1577,8 @@ function drawBattle(dt) {
     c.save();
     c.fillStyle = 'rgba(0,0,0,0.25)';
     c.beginPath(); c.ellipse(e.x, e.y, w * 0.38, 5, 0, 0, 7); c.fill();
-    if (e.blink > 0 && Math.floor(e.blink / 60) % 2) c.globalAlpha = 0.25;
+    if (e.hitFlash > 0) { e.hitFlash -= dt; c.filter = 'brightness(3) saturate(0)'; }
+    else if (e.blink > 0 && Math.floor(e.blink / 60) % 2) c.globalAlpha = 0.25;
     if (e.gone) { c.globalAlpha = Math.max(0, e.dying); c.filter = e.fled ? 'none' : 'brightness(1.8) sepia(1) hue-rotate(220deg)'; }
     c.translate(e.x + e.ox, e.y + bob);
     c.scale(-1, 1); // 左（パーティ側）を向かせる
@@ -1278,19 +1628,18 @@ function drawBattle(dt) {
       c.beginPath(); c.moveTo(x - 6, yy - 6); c.lineTo(x + 6, yy - 6); c.lineTo(x, yy + 2); c.closePath(); c.fill();
     }
   });
+  // 魔法中は画面を暗くする
+  const dimFx = B.fx.find(f => f.def.dim);
+  const dimTarget = dimFx ? dimFx.def.dim : 0;
+  B.dim += (dimTarget - B.dim) * Math.min(1, dt / 120);
+  if (dimFx) B.dimColor = dimFx.def.dimColor;
+  if (B.dim > 0.01) { c.globalAlpha = B.dim; c.fillStyle = B.dimColor || '#000000'; c.fillRect(-20, -20, W + 40, H + 40); c.globalAlpha = 1; }
   // エフェクト
-  for (const fx of B.fx) { fx.t += dt; drawFx(c, fx); }
+  for (const fx of B.fx) updateFx(fx, dt);
   B.fx = B.fx.filter(f => f.t < f.dur);
-  for (const p of B.parts) {
-    p.t += dt; p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt;
-    c.globalAlpha = Math.max(0, 1 - p.t / p.life);
-    c.fillStyle = p.color;
-    if (p.shard) { c.fillRect(p.x, p.y, 1.5, p.size * 2.5); }
-    else if (p.sparkle) { c.fillRect(p.x - p.size, p.y, p.size * 2 + 1, 1); c.fillRect(p.x, p.y - p.size, 1, p.size * 2 + 1); }
-    else c.fillRect(p.x, p.y, p.size, p.size);
-  }
+  drawParticles(c, dt);
+  for (const fx of B.fx) drawFx(c, fx);
   c.globalAlpha = 1;
-  B.parts = B.parts.filter(p => p.t < p.life);
   // ダメージ数字
   c.font = 'bold 14px "DotGothic16", monospace';
   c.textAlign = 'center';
@@ -1303,7 +1652,7 @@ function drawBattle(dt) {
   }
   c.globalAlpha = 1;
   B.nums = B.nums.filter(n => n.t < 1100);
-  if (B.flash > 0) { c.fillStyle = `rgba(255,255,230,${B.flash * 0.7})`; c.fillRect(-10, -10, W + 20, H + 20); B.flash -= dt / 250; }
+  if (B.flash > 0) { c.globalAlpha = Math.min(1, B.flash * 0.75); c.fillStyle = B.flashColor || '#ffffff'; c.fillRect(-20, -20, W + 40, H + 40); c.globalAlpha = 1; B.flash -= dt / 220; }
   if (B.guard > 0) {
     c.fillStyle = 'rgba(120,190,255,0.85)'; c.font = '10px "DotGothic16", monospace'; c.textAlign = 'left';
     c.fillText('鉄壁 残り' + B.guard, 6, 14);
