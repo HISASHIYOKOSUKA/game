@@ -91,9 +91,129 @@ const INTERIORS = {
     ],
     npcs: [{ id: 'baba', sprite: 'baba', role: 'talk' }],
   },
+  belgaInn: {
+    name: '宿屋 港のしずく亭', floor: 'wood', wall: '#d8f0ec', rug: '#2a8a8a', town: 'belga',
+    layout: [
+      '###########',
+      '###########',
+      '#b.b..skp.#',
+      '#.....CCC.#',
+      '#.........#',
+      '#b.b..,,,.#',
+      '#p....,,,x#',
+      '#####D#####',
+    ],
+    npcs: [{ id: 'belgaInnKeeper', sprite: 'belgaInn', role: 'inn', inn: 'belgaInn' },
+      { id: 'sailorIn', sprite: 'sailor', x: 4, y: 4, dir: 'left', lines: ['海の むこうの 国でも、\n空に 黒い 太陽が 見えたって うわさだ。'] }],
+  },
+  belgaShop: {
+    name: 'ベルガ武具商会', floor: 'stone', wall: '#e0d8cc', rug: '#a83a3a', town: 'belga',
+    layout: [
+      '###########',
+      '###########',
+      '#w.a.k.a.w#',
+      '#..CCCCC..#',
+      '#.........#',
+      '#x.,,,,,.x#',
+      '#..,,,,,..#',
+      '#####D#####',
+    ],
+    npcs: [{ id: 'rosso', sprite: 'belgaShop', role: 'shop', shop: 'belgaShop' }],
+  },
+  belgaItem: {
+    name: 'ベルガ道具店', floor: 'wood', wall: '#fbecd0', rug: '#e07a2a', town: 'belga',
+    layout: [
+      '###########',
+      '###########',
+      '#s.s.k.s.s#',
+      '#..CCCCC..#',
+      '#.........#',
+      '#x.,,,,,.x#',
+      '#p.,,,,,.x#',
+      '#####D#####',
+    ],
+    npcs: [{ id: 'kara', sprite: 'dancer', role: 'shop', shop: 'belgaItem' }],
+  },
+  mansion: {
+    name: 'ゴルドー邸', floor: 'stone', wall: '#f4ecd8', rug: '#a82838', town: 'belga',
+    layout: [
+      '#############',
+      '#############',
+      '#B.p..k..p.B#',
+      '#....,,,....#',
+      '#x...,,,...x#',
+      '#....,,,....#',
+      '#p...,,,...p#',
+      '#....,,,....#',
+      '######D######',
+    ],
+    npcs: [{ id: 'gordo', sprite: 'gordo', role: 'talk', when: { not: 'gordoGone' } },
+      { id: 'mansionGuard', sprite: 'thug', x: 3, y: 4, dir: 'right', lines: ['ゴルドーさまに 用か？\n…へんな まねを したら ただじゃ おかねえぞ。'], when: { not: 'gordoGone' } }],
+  },
+  academy: {
+    name: '王立魔術学院', floor: 'wood', wall: '#e8e2f0', rug: '#3a4a8a', town: 'sofia',
+    layout: [
+      '###############',
+      '###############',
+      '#BBB.B.k.B.BBB#',
+      '#.............#',
+      '#.tt..,,,..tt.#',
+      '#.tt..,,,..tt.#',
+      '#.....,,,.....#',
+      '#p....,,,....p#',
+      '#######D#######',
+    ],
+    npcs: [{ id: 'dean', sprite: 'dean', role: 'talk' },
+      { id: 'librarian', sprite: 'librarian', x: 3, y: 3, dir: 'down', lines: ['図書室では おしずかに。\n……ノアくんなら いつも 一番おくの 席に いたわね。'] },
+      { id: 'studentA', sprite: 'student', x: 4, y: 6, dir: 'up', lines: ['ノアの やつ、また「世界が おわる」って\n論文を 出したらしいぜ。 こりないよな。'],
+        chLines: { final: ['ノアは 本当の ことを 言っていたんだ……。\nぼくら、ひどいこと 言っちゃったな。'] } },
+      { id: 'studentB', sprite: 'studentF', x: 10, y: 6, dir: 'up', lines: ['オルガ先生の 授業、すきなの。\nむずかしいけど、星の 話が とっても きれいで。'] }],
+  },
+  sofiaInn: {
+    name: '宿屋 ふくろう亭', floor: 'wood', wall: '#f4ecd0', rug: '#5a8a4a', town: 'sofia',
+    layout: [
+      '###########',
+      '###########',
+      '#b.b..skB.#',
+      '#.....CCC.#',
+      '#.........#',
+      '#b.b..,,,.#',
+      '#p....,,,p#',
+      '#####D#####',
+    ],
+    npcs: [{ id: 'sofiaInnKeeper', sprite: 'innkeeper', role: 'inn', inn: 'sofiaInn' }],
+  },
+  sofiaShop: {
+    name: '魔法具店 ルーン', floor: 'purple', wall: '#4a3a6a', rug: '#7a4ab8', town: 'sofia',
+    layout: [
+      '###########',
+      '###########',
+      '#B.s.k.s.B#',
+      '#..CCCCC..#',
+      '#.........#',
+      '#c.,,,,,.c#',
+      '#..,,,,,..#',
+      '#####D#####',
+    ],
+    npcs: [{ id: 'elma', sprite: 'librarian', role: 'shop', shop: 'sofiaShop' }],
+  },
+  noaHouse: {
+    name: 'ノアの研究室', floor: 'wood', wall: '#dce8f4', rug: '#3a5aa8', town: 'sofia',
+    layout: [
+      '#########',
+      '#########',
+      '#BB.b.BB#',
+      '#.......#',
+      '#.tt..c.#',
+      '#.tt....#',
+      '#......p#',
+      '#D#######',
+    ],
+    npcs: [],
+  },
 };
 
-const FURNITURE_KEYS = { b: 'bed', s: 'shelf', w: 'weaponrack', a: 'armorstand', p: 'plant', t: 'table', f: 'fireplace', x: 'barrel', B: 'bookshelf', r: 'crystal' };
+const FURNITURE_KEYS = { b: 'bed', s: 'shelf', w: 'weaponrack', a: 'armorstand', p: 'plant', t: 'table', f: 'fireplace', x: 'barrel', B: 'bookshelf', r: 'crystal', c: 'crystal' };
 
 // ---------- 床・壁のタイル ----------
 function drawInteriorTile(c, type, variant, st) {
@@ -238,7 +358,8 @@ function buildInterior(id) {
   }
   for (const n of d.npcs) {
     const pos = n.x !== undefined ? { x: n.x, y: n.y } : keeper;
+    if (!pos) continue;
     npcs.push(Object.assign({ dir: 'down' }, n, pos));
   }
-  return { id, name: d.name, interior: true, style: d, map, w, h, objects, npcs, exit };
+  return { id, name: d.name, interior: true, style: d, map, w, h, objects, npcs, exit, town: d.town || 'lumina' };
 }

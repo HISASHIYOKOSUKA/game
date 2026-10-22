@@ -239,6 +239,14 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
 #chapter.show #ch-sub { animation: chIn .8s ease .8s forwards; }
 @keyframes chIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
+#credits { z-index: 40; pointer-events: none; background: transparent; overflow: hidden; display: block; }
+#credits .credits-inner { position: absolute; left: 0; right: 0; top: 0; text-align: center; color: #fff; text-shadow: 0 0 4px #000, 2px 2px 0 #000; font-size: 15px; line-height: 1.7; }
+#credits h3 { color: var(--gold); font-size: 13px; margin: 26px 0 4px; font-weight: normal; letter-spacing: .1em; }
+#credits p { margin: 0; }
+#theend { z-index: 70; flex-direction: column; justify-content: center; align-items: center; gap: 14px; background: #000; text-align: center; }
+#theend .te-title { font-size: 40px; color: #fff; letter-spacing: .3em; animation: chIn 2s ease forwards; opacity: 0; }
+#theend .te-sub { color: var(--gold); font-size: 13px; letter-spacing: .2em; animation: chIn 2s ease 1s forwards; opacity: 0; }
+#theend .btn { margin-top: 30px; animation: chIn 1s ease 3s forwards; opacity: 0; }
 #fade, #flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 50; }
 #fade { background: #000; transition: opacity .35s; }
 #fade.on { opacity: 1; }
@@ -287,6 +295,7 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
       <div class="menu-actions">
         <button id="btn-save" class="btn">セーブ</button>
         <button id="btn-sound" class="btn">効果音：ON</button>
+        <button id="btn-music" class="btn">音楽：ON</button>
         <button id="btn-close" class="btn">とじる</button>
       </div>
     </div>
@@ -329,7 +338,7 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
       <button id="btn-new" class="btn">はじめから</button>
       <button id="btn-continue" class="btn" hidden>つづきから</button>
     </div>
-    <p class="title-note">序章と第一章（セレナの章）まで遊べます。音が出ます。</p>
+    <p class="title-note">序章〜最終章まで 遊べます。音楽が流れます。</p>
   </div>
 
   <div id="talk" class="overlay" hidden>
@@ -351,6 +360,9 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
     <div id="ch-sub"></div>
   </div>
 
+  <div id="credits" class="overlay" hidden></div>
+  <div id="theend" class="overlay" hidden><div class="te-title">おわり</div><div class="te-sub">THANK YOU FOR PLAYING</div><button id="btn-end" class="btn">タイトルへ</button></div>
+
   <div id="flash"></div>
   <div id="fade"></div>
 </div>
@@ -358,7 +370,18 @@ canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edge
 <script src="js/map.js"></script>
 <script src="js/town.js"></script>
 <script src="js/interior.js"></script>
+<script src="js/dungeon.js"></script>
+<script src="js/sprites.js"></script>
+<script src="js/music.js"></script>
 <script src="js/story.js"></script>
-<script src="js/game.js"></script>
+<script src="js/core.js"></script>
+<script src="js/tiles.js"></script>
+<script src="js/field.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/event.js"></script>
+<script src="js/shop.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/main.js"></script>
 </body>
 </html>

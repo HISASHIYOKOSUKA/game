@@ -15,6 +15,15 @@ const BUILDING_STYLES = {
   armor:  { wall: '#d8e6fa', wallDark: '#a8bedc', wallStyle: 'brick', roof: '#4a78c8', roofDark: '#30549a', roofLight: '#78a4ec', roofStyle: 'flat', sign: 'armor', awning: ['#ffffff', '#4a78c8'] },
   house1: { wall: '#fce0e4', wallDark: '#e4b4bc', wallStyle: 'siding', roof: '#7a5ab8', roofDark: '#563c8c', roofLight: '#a688dc', roofStyle: 'gable', chimney: true },
   manor:  { wall: '#efe6d6', wallDark: '#c8b89c', wallStyle: 'stone', roof: '#8a3a4a', roofDark: '#5e2232', roofLight: '#b85a6a', roofStyle: 'hip', chimney: true, door2: true },
+  belgaInn:  { wall: '#f4dcc4', wallDark: '#d4b498', wallStyle: 'brick', roof: '#2a8a8a', roofDark: '#1a6060', roofLight: '#5ab8b0', roofStyle: 'gable', sign: 'inn', awning: ['#ffffff', '#2a8a8a'], chimney: true },
+  belgaShop: { wall: '#d8d4cc', wallDark: '#aaa498', wallStyle: 'stone', roof: '#a83a3a', roofDark: '#782424', roofLight: '#d86a5a', roofStyle: 'hip', sign: 'weapon', awning: ['#f4e8d0', '#a83a3a'] },
+  belgaItem: { wall: '#fbeccb', wallDark: '#e2c99a', wallStyle: 'siding', roof: '#e07a2a', roofDark: '#a85418', roofLight: '#f8a860', roofStyle: 'flat', sign: 'item', awning: ['#ffffff', '#e07a2a'] },
+  mansion:   { wall: '#f8f4ec', wallDark: '#d8ccb4', wallStyle: 'stone', roof: '#d8a830', roofDark: '#a87818', roofLight: '#f8d870', roofStyle: 'hip', chimney: true, door2: true, gold: true },
+  academy:   { wall: '#e8e2f0', wallDark: '#bcb4cc', wallStyle: 'stone', roof: '#3a4a8a', roofDark: '#24305e', roofLight: '#6a7ac0', roofStyle: 'hip', sign: 'book', door2: true, chimney: true },
+  sofiaInn:  { wall: '#f8f0d8', wallDark: '#e0d0a8', wallStyle: 'siding', roof: '#5a8a4a', roofDark: '#3a6430', roofLight: '#88b878', roofStyle: 'gable', sign: 'inn', awning: ['#ffffff', '#5a8a4a'], chimney: true },
+  sofiaShop: { wall: '#e4dcf8', wallDark: '#b8acd8', wallStyle: 'brick', roof: '#7a4ab8', roofDark: '#54308a', roofLight: '#a87ae0', roofStyle: 'flat', sign: 'magic', awning: ['#ffffff', '#7a4ab8'] },
+  noaHouse:  { wall: '#dce8f4', wallDark: '#aac0d8', wallStyle: 'siding', roof: '#3a5aa8', roofDark: '#24407a', roofLight: '#6a8ad8', roofStyle: 'gable', chimney: true },
+  ruin:      { wall: '#7a6a5e', wallDark: '#4a3e36', wallStyle: 'stone', roof: '#4a3a32', roofDark: '#2a201c', roofLight: '#6a5a4e', roofStyle: 'gable', ruin: true },
   house2: { wall: '#fff6d0', wallDark: '#e4d498', wallStyle: 'siding', roof: '#4a9a58', roofDark: '#2e7040', roofLight: '#78c486', roofStyle: 'gable' },
 };
 
@@ -31,6 +40,10 @@ function drawIcon(c, kind, x, y) {
   } else if (kind === 'item') { // ポーション
     p(5, 0, 2, 2, '#a8703c'); p(4, 2, 4, 2, OUT); p(5, 2, 2, 2, '#d8f0ff');
     p(2, 4, 8, 7, OUT); p(3, 5, 6, 5, '#e84858'); p(3, 5, 6, 2, '#ff8a98'); p(4, 5, 1, 2, '#ffffff'); p(3, 11, 6, 1, OUT);
+  } else if (kind === 'book') { // 本
+    p(1, 2, 10, 8, OUT); p(2, 3, 4, 6, '#f4ecd8'); p(6, 3, 4, 6, '#f4ecd8'); p(6, 3, 1, 6, OUT); p(3, 4, 2, 1, '#8a8a9a'); p(7, 5, 2, 1, '#8a8a9a'); p(1, 10, 10, 1, '#4a5aa8');
+  } else if (kind === 'magic') { // 星と結晶
+    p(5, 0, 2, 12, '#a87ae0'); p(0, 5, 12, 2, '#a87ae0'); p(3, 3, 6, 6, '#e8d0ff'); p(5, 5, 2, 2, '#ffffff');
   } else if (kind === 'inn') { // ベッド
     p(0, 3, 2, 8, '#8a5a30'); p(10, 6, 2, 5, '#8a5a30'); p(2, 6, 3, 2, '#ffffff'); p(2, 8, 8, 2, '#e84858'); p(5, 6, 5, 2, '#e84858'); p(1, 10, 10, 1, '#5a3a20');
     p(7, 1, 2, 1, '#4a78c8'); p(8, 2, 1, 1, '#4a78c8'); p(7, 3, 2, 1, '#4a78c8');
@@ -81,6 +94,11 @@ function makeBuildingSprite(o) {
       if (!row.upper && st.sign && i === o.door + 1) continue; // 看板の場所
       if (row.upper && st.roofStyle === 'gable' && i === o.door) continue;
       const x = cx - winW / 2;
+      if (st.ruin) { // 割れた窓と 打ちつけた板
+        oRect(c, x - 1, winY - 1, winW + 2, winH + 2, '#3a2a22'); box(c, x + 1, winY + 1, winW - 2, winH - 2, '#140c0a');
+        oRect(c, x - 3, winY + 3, winW + 6, 3, '#8a6a48'); oRect(c, x - 2, winY + winH - 6, winW + 4, 3, '#7a5a3a');
+        continue;
+      }
       oRect(c, x - 1, winY - 1, winW + 2, winH + 2, '#f8f6ee');
       box(c, x + 1, winY + 1, winW - 2, winH - 2, '#9ed4f0');
       box(c, x + 1, winY + 1, winW - 2, 3, '#c8ecff');
@@ -181,6 +199,74 @@ function makeBuildingSprite(o) {
     oRect(c, cx, 0, 9, 13, '#c0584a'); box(c, cx + 1, 3, 7, 1, '#8a3a32'); box(c, cx + 1, 7, 7, 1, '#8a3a32');
     oRect(c, cx - 1, 0, 11, 3, '#8a8290');
   }
+  if (st.gold) { box(c, wx0, wallTop + 2, wx1 - wx0, 2, '#e8c048'); box(c, wx0, wallB - 7, wx1 - wx0, 2, '#e8c048'); }
+  if (st.ruin) { // 焼けこげて くずれた屋根と すす
+    c.globalCompositeOperation = 'destination-out';
+    c.beginPath(); c.moveTo(W * 0.35, 0); c.lineTo(W * 0.5, roofB * 0.7); c.lineTo(W * 0.6, roofB * 0.35); c.lineTo(W * 0.72, roofB * 0.8); c.lineTo(W * 0.85, 0); c.closePath(); c.fill();
+    c.globalCompositeOperation = 'source-over';
+    c.fillStyle = 'rgba(20,10,10,0.45)'; for (let i = 0; i < 6; i++) { c.beginPath(); c.ellipse(8 + i * W / 6, wallTop + 10 + (i % 2) * 8, 8, 12, 0, 0, 7); c.fill(); }
+    c.strokeStyle = OUT; c.lineWidth = 1; c.beginPath(); c.moveTo(W * 0.3, wallTop + 4); c.lineTo(W * 0.36, wallTop + 18); c.lineTo(W * 0.32, wallTop + 28); c.stroke();
+  }
+  return cv;
+}
+
+function makeStatueSprite() {
+  const cv = newCanvas(64, 88), c = cv.getContext('2d');
+  oRect(c, 8, 64, 48, 22, '#c8c0b8'); box(c, 9, 65, 46, 3, '#e8e0d8'); box(c, 18, 72, 28, 6, '#a8a098');
+  // 金ピカのゴルドー
+  c.fillStyle = OUT; c.beginPath(); c.ellipse(32, 46, 17, 18, 0, 0, 7); c.fill();
+  c.fillStyle = '#e8b830'; c.beginPath(); c.ellipse(32, 46, 16, 17, 0, 0, 7); c.fill();
+  c.fillStyle = OUT; c.beginPath(); c.arc(32, 22, 11, 0, 7); c.fill();
+  c.fillStyle = '#f0c848'; c.beginPath(); c.arc(32, 22, 10, 0, 7); c.fill();
+  box(c, 26, 26, 12, 2, '#a87818'); box(c, 27, 19, 3, 3, '#a87818'); box(c, 34, 19, 3, 3, '#a87818');
+  c.fillStyle = '#fff8c0'; c.fillRect(25, 15, 4, 3); c.fillRect(22, 38, 5, 10);
+  oRect(c, 12, 36, 7, 18, '#e8b830'); oRect(c, 45, 30, 7, 14, '#e8b830'); oRect(c, 47, 24, 10, 8, '#e8b830');
+  box(c, 30, 26, 2, 2, '#ff6080');
+  return cv;
+}
+function makeStallSprite(seed) {
+  const cv = newCanvas(32, 44), c = cv.getContext('2d');
+  const cols = [['#e84858', '#ffffff'], ['#3a8ad8', '#ffffff'], ['#f0a030', '#ffffff']][seed % 3];
+  oRect(c, 3, 12, 3, 30, '#8a5a30'); oRect(c, 26, 12, 3, 30, '#8a5a30');
+  oRect(c, 1, 26, 30, 10, '#b07a4a'); box(c, 2, 27, 28, 2, '#d09a64');
+  for (let i = 0; i < 5; i++) { c.fillStyle = ['#ff6060', '#ffd040', '#60c060', '#ff9a30', '#c070ff'][(i + seed) % 5]; c.beginPath(); c.arc(6 + i * 5, 25, 2.5, 0, 7); c.fill(); }
+  box(c, 0, 4, 32, 10, OUT);
+  for (let x = 1; x < 31; x += 5) box(c, x, 5, 5, 8, (x / 5) % 2 < 1 ? cols[0] : cols[1]);
+  return cv;
+}
+function makeTentSprite() {
+  const cv = newCanvas(64, 48), c = cv.getContext('2d');
+  c.fillStyle = OUT; c.beginPath(); c.moveTo(2, 46); c.lineTo(32, 4); c.lineTo(62, 46); c.closePath(); c.fill();
+  c.fillStyle = '#c8b088'; c.beginPath(); c.moveTo(5, 45); c.lineTo(32, 7); c.lineTo(59, 45); c.closePath(); c.fill();
+  c.fillStyle = '#a89068'; c.beginPath(); c.moveTo(32, 7); c.lineTo(59, 45); c.lineTo(32, 45); c.closePath(); c.fill();
+  c.fillStyle = '#3a2a20'; c.beginPath(); c.moveTo(24, 45); c.lineTo(32, 26); c.lineTo(40, 45); c.closePath(); c.fill();
+  return cv;
+}
+function makeCampfireSprite(frame) {
+  const cv = newCanvas(32, 32), c = cv.getContext('2d');
+  for (const [x, y, a] of [[8, 26, 0.3], [14, 28, -0.2], [20, 26, -0.4]]) { c.save(); c.translate(x + 4, y); c.rotate(a); oRect(c, -6, -2, 12, 4, '#6a4020'); c.restore(); }
+  const f = frame ? 1 : 0;
+  c.fillStyle = '#ff6a1a'; c.beginPath(); c.moveTo(9, 26); c.quadraticCurveTo(10 - f * 2, 12, 16, 6 + f * 2); c.quadraticCurveTo(22 + f * 2, 12, 23, 26); c.closePath(); c.fill();
+  c.fillStyle = '#ffd040'; c.beginPath(); c.moveTo(12, 26); c.quadraticCurveTo(13, 16, 16, 12 - f); c.quadraticCurveTo(19, 16, 20, 26); c.closePath(); c.fill();
+  c.fillStyle = '#fff8c0'; c.beginPath(); c.ellipse(16, 23, 2.5, 4, 0, 0, 7); c.fill();
+  return cv;
+}
+function makeTowerSprite() {
+  const cv = newCanvas(72, 168), c = cv.getContext('2d');
+  // 胴体
+  c.fillStyle = OUT; c.beginPath(); c.moveTo(10, 166); c.lineTo(16, 40); c.lineTo(56, 40); c.lineTo(62, 166); c.closePath(); c.fill();
+  c.fillStyle = '#4a6ab0'; c.beginPath(); c.moveTo(12, 165); c.lineTo(18, 42); c.lineTo(54, 42); c.lineTo(60, 165); c.closePath(); c.fill();
+  c.fillStyle = '#3a5694'; c.beginPath(); c.moveTo(40, 42); c.lineTo(54, 42); c.lineTo(60, 165); c.lineTo(44, 165); c.closePath(); c.fill();
+  for (let y = 52; y < 160; y += 12) { c.fillStyle = '#2a3e70'; c.fillRect(14 + (y - 40) * 0.05, y, 46 - (y - 40) * 0.0, 1); }
+  for (const y of [70, 104, 138]) { oRect(c, 30, y, 12, 16, '#9fe0ff'); box(c, 31, y + 1, 3, 14, '#ffffff'); }
+  // 入口
+  oRect(c, 26, 144, 20, 22, '#1a2440'); c.fillStyle = '#7fd8ff55'; c.fillRect(28, 146, 16, 20);
+  // 屋根と結晶
+  c.fillStyle = OUT; c.beginPath(); c.moveTo(10, 44); c.lineTo(36, 14); c.lineTo(62, 44); c.closePath(); c.fill();
+  c.fillStyle = '#24407a'; c.beginPath(); c.moveTo(13, 42); c.lineTo(36, 17); c.lineTo(59, 42); c.closePath(); c.fill();
+  c.fillStyle = OUT; c.beginPath(); c.moveTo(36, 0); c.lineTo(43, 12); c.lineTo(36, 24); c.lineTo(29, 12); c.closePath(); c.fill();
+  c.fillStyle = '#7fd8ff'; c.beginPath(); c.moveTo(36, 2); c.lineTo(41, 12); c.lineTo(36, 22); c.lineTo(31, 12); c.closePath(); c.fill();
+  c.fillStyle = '#ffffff'; c.fillRect(34, 6, 2, 6);
   return cv;
 }
 
@@ -280,7 +366,12 @@ function buildTownObjects(castleSprite) {
     if (o.kind === 'building') { o.sprite = makeBuildingSprite(o); o.solidFrom = 1; o.doorTile = { x: o.x + o.door, y: o.y + o.h - 1 }; }
     else if (o.kind === 'tree') o.sprite = makeTreeSprite(i * 7 + 3);
     else if (o.kind === 'cave') o.sprite = makeCaveSprite();
-    else if (o.kind === 'castle') { o.sprite = castleSprite; o.text = 'ルミナ城。\nいまは 門が かたく とじられている。'; }
+    else if (o.kind === 'statue') o.sprite = makeStatueSprite();
+    else if (o.kind === 'stall') o.sprite = makeStallSprite(i);
+    else if (o.kind === 'tent') o.sprite = makeTentSprite();
+    else if (o.kind === 'campfire') { o.frames = [makeCampfireSprite(0), makeCampfireSprite(1)]; o.sprite = o.frames[0]; }
+    else if (o.kind === 'tower') { o.sprite = makeTowerSprite(); o.solidFrom = 1; o.doorTile = { x: o.x + 1, y: o.y + o.h - 1 }; }
+    else if (o.kind === 'castle') { o.sprite = castleSprite; o.doorTile = { x: o.x, y: o.y + 1 }; }
     else if (o.kind === 'fountain') { o.frames = fountainFrames; o.sprite = fountainFrames[0]; o.text = 'きれいな 水が わきでている。\nコインが たくさん しずんでいる…。'; }
     else o.sprite = sprites[o.kind];
     return o;
